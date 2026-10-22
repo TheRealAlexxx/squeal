@@ -22,13 +22,13 @@ def t(name, cond, detail=""):
 def test_select_star():
     q = parse("select * from people")
     t("star", isinstance(q.items[0][0], ast.Star))
-    t("source", q.source == "people")
+    t("source", q.source.name == "people")
 
 def test_columns_alias():
     q = parse("select name as n, age a from 'users.csv'")
     t("alias as", q.items[0][1] == "n")
     t("bare alias", q.items[1][1] == "a")
-    t("csv source", q.source == "users.csv")
+    t("csv source", q.source.name == "users.csv")
 
 def test_distinct():
     q = parse("select distinct city from t")
