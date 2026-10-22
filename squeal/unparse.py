@@ -35,6 +35,10 @@ def to_sql(node):
         if node.star:
             return "%s(*)" % node.name
         return "%s(%s)" % (node.name, ", ".join(to_sql(a) for a in node.args))
+    if isinstance(node, ast.Subquery):
+        return "(subquery)"
+    if isinstance(node, ast.Exists):
+        return "EXISTS (subquery)"
     if isinstance(node, ast.Case):
         parts = ["CASE"]
         for cond, val in node.whens:

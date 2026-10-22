@@ -139,6 +139,26 @@ class FuncCall(Node):
         return "FuncCall(%s, %r%s)" % (self.name, self.args, ", *" if self.star else "")
 
 
+class Subquery(Node):
+    __slots__ = ("select",)
+
+    def __init__(self, select):
+        self.select = select
+
+    def __repr__(self):
+        return "Subquery(%r)" % self.select
+
+
+class Exists(Node):
+    __slots__ = ("select",)
+
+    def __init__(self, select):
+        self.select = select
+
+    def __repr__(self):
+        return "Exists(%r)" % self.select
+
+
 class Case(Node):
     __slots__ = ("whens", "else_val")
 

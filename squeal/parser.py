@@ -265,6 +265,10 @@ class Parser:
         if self.at_kw("in"):
             self.advance()
             self.expect_op("(")
+            if self.at_kw("select"):
+                values = [ast.Subquery(self.parse_select())]
+                self.expect_op(")")
+                return ast.InList(left, values, negated)
             values = [self.parse_expr()]
             while self.at_op(","):
                 self.advance()
@@ -325,8 +329,18 @@ class Parser:
             return ast.Literal(False)
         if tok.is_kw("case"):
             return self.parse_case()
+        if tok.is_kw("exists"):
+            self.advance()
+            self.expect_op("(")
+            inner = self.parse_select()
+            self.expect_op(")")
+            return ast.Exists(inner)
         if self.at_op("("):
             self.advance()
+            if self.at_kw("select"):
+                inner = self.parse_select()
+                self.expect_op(")")
+                return ast.Subquery(inner)
             expr = self.parse_expr()
             self.expect_op(")")
             return expr

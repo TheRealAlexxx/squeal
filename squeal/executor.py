@@ -15,9 +15,10 @@ from .values import (AGGREGATES, SCALAR_FUNCTIONS, arith, compare, like,
 class RowContext:
     """One row: column lookups come from this row only."""
 
-    def __init__(self, schema, row):
+    def __init__(self, schema, row, resolve=None):
         self.schema = schema
         self.row = row
+        self.resolve = resolve
 
     def get(self, name):
         return self.row[self.schema.resolve(name)]
@@ -30,9 +31,10 @@ class GroupContext:
     """A whole group of rows: aggregates see every row, anything else
     reads the first one (the SQLite convention for bare columns)."""
 
-    def __init__(self, schema, rows):
+    def __init__(self, schema, rows, resolve=None):
         self.schema = schema
         self.group = rows
+        self.resolve = resolve
 
     def get(self, name):
         return self.group[0][self.schema.resolve(name)]
@@ -75,11 +77,20 @@ def eval_expr(node, ctx):
         value = eval_expr(node.expr, ctx)
         if value is None:
             return None
-        seen_null = False
+        candidates = []
         for candidate in node.values:
-            eq = compare("=", value, eval_expr(candidate, ctx))
+            if isinstance(candidate, ast.Subquery):
+                result = _subquery_rows(candidate.select, ctx)
+                if len(result.columns) != 1:
+                    raise SquealError("an IN subquery must return exactly one column")
+                candidates.extend(row[0] for row in result.rows)
+            else:
+                candidates.append(eval_expr(candidate, ctx))
+        seen_null = False
+        for candidate in candidates:
+            eq = compare("=", value, candidate)
             if eq is True:
-                return (not node.negated) or False if node.negated else True
+                return False if node.negated else True
             if eq is None:
                 seen_null = True
         if node.negated:
@@ -100,7 +111,30 @@ def eval_expr(node, ctx):
             if truthy(eval_expr(cond, ctx)) is True:
                 return eval_expr(val, ctx)
         return eval_expr(node.else_val, ctx) if node.else_val is not None else None
+    if isinstance(node, ast.Subquery):
+        return _run_subquery(node.select, ctx)
+    if isinstance(node, ast.Exists):
+        if ctx.resolve is None:
+            raise SquealError("EXISTS needs a table source")
+        return len(execute(node.select, ctx.resolve).rows) > 0
     raise SquealError("cannot evaluate %r" % (node,))
+
+
+def _subquery_rows(select, ctx):
+    if ctx.resolve is None:
+        raise SquealError("subqueries need a table source")
+    return execute(select, ctx.resolve)
+
+
+def _run_subquery(select, ctx):
+    result = _subquery_rows(select, ctx)
+    if len(result.columns) != 1:
+        raise SquealError("a scalar subquery must return exactly one column")
+    if not result.rows:
+        return None
+    if len(result.rows) > 1:
+        raise SquealError("a scalar subquery returned %d rows" % len(result.rows))
+    return result.rows[0][0]
 
 
 def eval_call(node, ctx):
@@ -111,7 +145,7 @@ def eval_call(node, ctx):
         if node.star:
             values = ctx.rows()
         else:
-            values = [eval_expr(node.args[0], RowContext(ctx.schema, row))
+            values = [eval_expr(node.args[0], RowContext(ctx.schema, row, ctx.resolve))
                       for row in ctx.rows()]
         return AGGREGATES[name](values, node.star)
     if name in SCALAR_FUNCTIONS:
@@ -260,7 +294,7 @@ def execute(select, source):
 
     if select.where is not None:
         rows = [r for r in rows
-                if truthy(eval_expr(select.where, RowContext(schema, r))) is True]
+                if truthy(eval_expr(select.where, RowContext(schema, r, resolve))) is True]
 
     aggregated = bool(select.group_by) or any(has_aggregate(e) for e, _ in select.items) \
         or (select.having is not None and has_aggregate(select.having)) \
@@ -270,7 +304,7 @@ def execute(select, source):
         groups = {}
         order = []
         for r in rows:
-            key = tuple(eval_expr(e, RowContext(schema, r)) for e in select.group_by)
+            key = tuple(eval_expr(e, RowContext(schema, r, resolve)) for e in select.group_by)
             if key not in groups:
                 groups[key] = []
                 order.append(key)
@@ -283,12 +317,12 @@ def execute(select, source):
         elif not select.group_by and not rows:
             order = [()]  # count(*) over empty input is still one row: 0
             groups[()] = []
-        contexts = [GroupContext(schema, groups[k]) for k in order]
+        contexts = [GroupContext(schema, groups[k], resolve) for k in order]
         if select.having is not None:
             contexts = [c for c in contexts
                         if truthy(eval_expr(select.having, c)) is True]
     else:
-        contexts = [RowContext(schema, r) for r in rows]
+        contexts = [RowContext(schema, r, resolve) for r in rows]
         if select.having is not None:
             raise SquealError("HAVING needs GROUP BY or an aggregate")
 
