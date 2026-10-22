@@ -24,9 +24,11 @@ STRING = 2
 KEYWORD = 3
 OP = 4
 END = 5
+SEMI = 6
 
 NAMES = {IDENT: "identifier", NUMBER: "number", STRING: "string",
-         KEYWORD: "keyword", OP: "operator", END: "end of input"}
+         KEYWORD: "keyword", OP: "operator", END: "end of input",
+         SEMI: "semicolon"}
 
 
 class Token:
@@ -129,6 +131,10 @@ def tokenize(sql):
         if two in TWO_CHAR_OPS:
             tokens.append(Token(OP, two, two, start_line, start_col))
             i += 2
+            continue
+        if ch == ";":
+            tokens.append(Token(SEMI, ch, None, start_line, start_col))
+            i += 1
             continue
         if ch in ONE_CHAR:
             tokens.append(Token(OP, ch, ch, start_line, start_col))

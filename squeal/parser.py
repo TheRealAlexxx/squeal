@@ -7,7 +7,7 @@ Precedence, weakest to strongest:
 
 from . import astnodes as ast
 from .errors import SquealError
-from .lexer import END, IDENT, KEYWORD, NUMBER, OP, STRING, tokenize
+from .lexer import END, IDENT, KEYWORD, NUMBER, OP, SEMI, STRING, tokenize
 
 
 class Parser:
@@ -48,15 +48,37 @@ class Parser:
     # entry point ---------------------------------------------------------
 
     def parse(self):
+        while self.cur.kind == SEMI:
+            self.advance()
         explain = False
         if self.at_kw("explain"):
             self.advance()
             explain = True
         stmt = self.parse_select()
+        while self.cur.kind == SEMI:
+            self.advance()
         if self.cur.kind != END:
             self.fail("unexpected %r after the end of the query" % self.cur.text)
         stmt.explain = explain
         return stmt
+
+    def parse_many(self):
+        """A script: successive statements separated by semicolons."""
+        statements = []
+        while True:
+            while self.cur.kind == SEMI:
+                self.advance()
+            if self.cur.kind == END:
+                return statements
+            explain = False
+            if self.at_kw("explain"):
+                self.advance()
+                explain = True
+            stmt = self.parse_select()
+            stmt.explain = explain
+            statements.append(stmt)
+            if self.cur.kind not in (SEMI, END):
+                self.fail("expected ';' between statements, found %r" % self.cur.text)
 
     def parse_select(self):
         self.expect_kw("select")
@@ -315,6 +337,15 @@ class Parser:
 def parse(sql):
     try:
         return Parser(sql).parse()
+    except SquealError as e:
+        if not e.source:
+            e.source = sql
+        raise
+
+
+def parse_many(sql):
+    try:
+        return Parser(sql).parse_many()
     except SquealError as e:
         if not e.source:
             e.source = sql

@@ -180,8 +180,16 @@ def execute(select, table):
     projected = []
     order_keys = []
     for ctx in contexts:
-        projected.append(tuple(project(ctx)))
-        order_keys.append([eval_expr(e, ctx) for e, _ in select.order_by])
+        row = tuple(project(ctx))
+        projected.append(row)
+        keys = []
+        for expr, _ in select.order_by:
+            # ORDER BY may name a select alias or output column
+            if isinstance(expr, ast.Column) and expr.name in out_columns:
+                keys.append(row[out_columns.index(expr.name)])
+            else:
+                keys.append(eval_expr(expr, ctx))
+        order_keys.append(keys)
 
     pairs = list(zip(projected, order_keys))
     if select.order_by:
