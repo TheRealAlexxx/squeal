@@ -163,3 +163,24 @@ def test_join_requires_on():
 test_table_alias(); test_join_syntax(); test_join_chains_left_assoc()
 test_cross_join(); test_join_requires_on()
 print("join parser tests passed")
+
+
+def test_window_parse():
+    q = parse("select row_number() over (partition by city order by age desc) from people")
+    w = q.items[0][0]
+    t("window", isinstance(w, ast.WindowCall))
+    t("window fn", w.call.name == "row_number")
+    t("partition", len(w.partition_by) == 1)
+    t("order", w.order_by[0][1] is True)
+
+def test_window_empty_over():
+    q = parse("select sum(score) over () from people")
+    w = q.items[0][0]
+    t("empty over", w.partition_by == [] and w.order_by == [])
+
+def test_window_order_only():
+    q = parse("select rank() over (order by score) from people")
+    t("order only", len(q.items[0][0].order_by) == 1)
+
+test_window_parse(); test_window_empty_over(); test_window_order_only()
+print("window parser tests passed")

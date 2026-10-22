@@ -140,6 +140,18 @@ class FuncCall(Node):
         return "FuncCall(%s, %r%s)" % (self.name, self.args, ", *" if self.star else "")
 
 
+class WindowCall(Node):
+    __slots__ = ("call", "partition_by", "order_by")
+
+    def __init__(self, call, partition_by, order_by):
+        self.call = call            # FuncCall
+        self.partition_by = partition_by  # [expr]
+        self.order_by = order_by          # [(expr, descending)]
+
+    def __repr__(self):
+        return "WindowCall(%r over ...)" % self.call
+
+
 class Subquery(Node):
     __slots__ = ("select",)
 
