@@ -212,6 +212,60 @@ def _fn_typeof(args):
     return "text"
 
 
+def _fn_ifnull(args):
+    return args[0] if args[0] is not None else args[1]
+
+
+def _fn_iif(args):
+    return args[1] if truthy(args[0]) is True else args[2]
+
+
+def _fn_instr(args):
+    if args[0] is None or args[1] is None:
+        return None
+    return str(args[0]).find(str(args[1])) + 1  # 1-based, 0 = not found
+
+
+def _fn_ltrim(args):
+    return None if args[0] is None else str(args[0]).lstrip()
+
+
+def _fn_rtrim(args):
+    return None if args[0] is None else str(args[0]).rstrip()
+
+
+def _fn_sign(args):
+    if args[0] is None:
+        return None
+    return (args[0] > 0) - (args[0] < 0)
+
+
+def _fn_floor(args):
+    import math
+    return None if args[0] is None else math.floor(args[0])
+
+
+def _fn_ceil(args):
+    import math
+    return None if args[0] is None else math.ceil(args[0])
+
+
+def _fn_power(args):
+    if args[0] is None or args[1] is None:
+        return None
+    return args[0] ** args[1]
+
+
+def _fn_sqrt(args):
+    import math
+    if args[0] is None:
+        return None
+    if args[0] < 0:
+        from .errors import SquealError
+        raise SquealError("sqrt of a negative number")
+    return math.sqrt(args[0])
+
+
 SCALAR_FUNCTIONS = {
     "upper": (1, 1, _fn_upper),
     "lower": (1, 1, _fn_lower),
@@ -224,6 +278,18 @@ SCALAR_FUNCTIONS = {
     "substr": (2, 3, _fn_substr),
     "replace": (3, 3, _fn_replace),
     "typeof": (1, 1, _fn_typeof),
+    "ifnull": (2, 2, _fn_ifnull),
+    "iif": (3, 3, _fn_iif),
+    "instr": (2, 2, _fn_instr),
+    "ltrim": (1, 1, _fn_ltrim),
+    "rtrim": (1, 1, _fn_rtrim),
+    "sign": (1, 1, _fn_sign),
+    "floor": (1, 1, _fn_floor),
+    "ceil": (1, 1, _fn_ceil),
+    "ceiling": (1, 1, _fn_ceil),
+    "power": (2, 2, _fn_power),
+    "pow": (2, 2, _fn_power),
+    "sqrt": (1, 1, _fn_sqrt),
 }
 
 
