@@ -5,6 +5,8 @@ bare name. Lookups accept `region`, `orders.region` or an alias, and a
 bare name that matches two columns is an error, not a coin flip.
 """
 
+import difflib
+
 from .errors import SquealError
 
 
@@ -27,7 +29,7 @@ class Schema:
                        if q is not None and name == q + "." + n]
             if len(matches) == 1:
                 return matches[0]
-            raise SquealError("no such column: %s" % name)
+            raise SquealError("no such column: %s%s" % (name, self._suggest(name)))
         matches = [i for i, (_, n) in enumerate(self.pairs) if n == name]
         if len(matches) == 1:
             return matches[0]
@@ -36,4 +38,17 @@ class Schema:
                          if n == name and q is not None]
             hint = " (did you mean %s?)" % " or ".join(qualified) if qualified else ""
             raise SquealError("ambiguous column: %s%s" % (name, hint))
-        raise SquealError("no such column: %s" % name)
+        raise SquealError("no such column: %s%s" % (name, self._suggest(name)))
+
+    def _suggest(self, name):
+        """A 'did you mean' hint from the closest real column names."""
+        candidates = sorted(set(self.names) |
+                            {"%s.%s" % (q, n) for q, n in self.pairs if q})
+        close = difflib.get_close_matches(name.lower(),
+                                          [c.lower() for c in candidates],
+                                          n=2, cutoff=0.6)
+        if not close:
+            return ""
+        lookup = {c.lower(): c for c in candidates}
+        chosen = ", ".join(lookup[c] for c in close)
+        return " (did you mean %s?)" % chosen

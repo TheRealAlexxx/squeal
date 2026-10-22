@@ -45,3 +45,24 @@ class SchemaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SuggestionTests(unittest.TestCase):
+    def test_typo_suggests_column(self):
+        schema = Schema([(None, "name"), (None, "score")])
+        with self.assertRaises(SquealError) as ctx:
+            schema.resolve("nmae")
+        self.assertIn("did you mean name", str(ctx.exception))
+
+    def test_distant_name_no_suggestion(self):
+        schema = Schema([(None, "name")])
+        with self.assertRaises(SquealError) as ctx:
+            schema.resolve("zzzzz")
+        self.assertNotIn("did you mean", str(ctx.exception))
+
+    def test_qualified_typo_suggests_qualified(self):
+        schema = Schema([("orders", "region")])
+        with self.assertRaises(SquealError) as ctx:
+            schema.resolve("orders.regoin")
+        self.assertIn("orders.region", str(ctx.exception))
+
