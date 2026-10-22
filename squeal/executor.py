@@ -19,6 +19,7 @@ class RowContext:
         self.schema = schema
         self.row = row
         self.resolve = resolve
+        self.window_values = {}  # id(WindowCall) -> value, precomputed
 
     def get(self, name):
         return self.row[self.schema.resolve(name)]
@@ -111,6 +112,11 @@ def eval_expr(node, ctx):
             if truthy(eval_expr(cond, ctx)) is True:
                 return eval_expr(val, ctx)
         return eval_expr(node.else_val, ctx) if node.else_val is not None else None
+    if isinstance(node, ast.WindowCall):
+        if id(node) not in ctx.window_values:
+            raise SquealError("window functions are only supported in the "
+                              "select list for now")
+        return ctx.window_values[id(node)]
     if isinstance(node, ast.Subquery):
         return _run_subquery(node.select, ctx)
     if isinstance(node, ast.Exists):
@@ -174,9 +180,117 @@ def eval_call(node, ctx):
     raise SquealError("unknown function: %s" % node.name)
 
 
+def _child_nodes(node):
+    slots = []
+    for klass in type(node).__mro__:
+        slots.extend(getattr(klass, "__slots__", ()))
+    for slot in slots:
+        value = getattr(node, slot)
+        if isinstance(value, ast.Node):
+            yield value
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, ast.Node):
+                    yield item
+                elif isinstance(item, (list, tuple)):
+                    for sub in item:
+                        if isinstance(sub, ast.Node):
+                            yield sub
+
+
 def has_aggregate(node):
-    return any(isinstance(n, ast.FuncCall) and n.name.lower() in AGGREGATES
-               for n in node.walk())
+    """True when a plain (non-window) aggregate call appears below node.
+
+    Aggregates inside a WindowCall belong to the window; they do not
+    turn the whole query into a GROUP BY query.
+    """
+    if isinstance(node, ast.WindowCall):
+        return False
+    if isinstance(node, ast.FuncCall) and node.name.lower() in AGGREGATES:
+        return True
+    return any(has_aggregate(child) for child in _child_nodes(node))
+
+
+RANKING_FUNCTIONS = {"row_number", "rank", "dense_rank"}
+
+
+def find_windows(select):
+    """Every WindowCall under the select items, in order."""
+    found = []
+    for expr, _ in select.items:
+        found.extend(n for n in expr.walk() if isinstance(n, ast.WindowCall))
+    return found
+
+
+def compute_windows(calls, schema, rows, resolve):
+    """Precompute every window call: {id(node): [value per input row]}.
+
+    Frame semantics: with an ORDER BY the frame is the partition start
+    through the current row (a running total); without one it is the
+    whole partition.
+    """
+    results = {}
+    for call in calls:
+        name = call.call.name
+        if name not in RANKING_FUNCTIONS and name not in AGGREGATES:
+            raise SquealError("%s() cannot be used as a window function" % name)
+        if name in RANKING_FUNCTIONS and call.call.args:
+            raise SquealError("%s() takes no arguments" % name)
+        if call.call.distinct:
+            raise SquealError("DISTINCT is not supported in window functions")
+        ctxs = [RowContext(schema, r, resolve) for r in rows]
+        pkeys = [tuple(eval_expr(e, c) for e in call.partition_by) for c in ctxs]
+        okeys = [[eval_expr(e, c) for e, _ in call.order_by] for c in ctxs]
+        descs = [d for _, d in call.order_by]
+
+        partitions = {}
+        for i, key in enumerate(pkeys):
+            partitions.setdefault(key, []).append(i)
+
+        values = [None] * len(rows)
+        for members in partitions.values():
+            if call.order_by:
+                from functools import cmp_to_key
+                members = sorted(members, key=cmp_to_key(
+                    lambda a, b: _cmp_rows(okeys[a], okeys[b], descs)))
+            if name in ("rank", "dense_rank"):
+                for i, r in _assign_ranks(name, members, okeys):
+                    values[i] = r
+                continue
+            for pos, i in enumerate(members):
+                if name == "row_number":
+                    values[i] = pos + 1
+                else:
+                    frame = members[:pos + 1] if call.order_by else members
+                    values[i] = _window_aggregate(call.call, ctxs, frame)
+        results[id(call)] = values
+    return results
+
+
+def _assign_ranks(name, members, okeys):
+    """rank(): ties share a rank, then gaps. dense_rank(): no gaps."""
+    ranks = []
+    for pos, i in enumerate(members):
+        if pos == 0:
+            ranks.append((i, 1))
+            continue
+        prev = members[pos - 1]
+        tied = _cmp_rows(okeys[prev], okeys[i],
+                         [False] * len(okeys[i])) == 0
+        if tied:
+            ranks.append((i, ranks[-1][1]))
+        elif name == "rank":
+            ranks.append((i, pos + 1))
+        else:
+            ranks.append((i, ranks[-1][1] + 1))
+    return ranks
+
+
+def _window_aggregate(call, ctxs, frame):
+    if call.star:
+        return AGGREGATES[call.name](frame, True)
+    values = [eval_expr(call.args[0], ctxs[i]) for i in frame]
+    return AGGREGATES[call.name](values, False)
 
 
 class Result:
@@ -312,9 +426,13 @@ def execute(select, source):
         rows = [r for r in rows
                 if truthy(eval_expr(select.where, RowContext(schema, r, resolve))) is True]
 
+    windows = find_windows(select)
     aggregated = bool(select.group_by) or any(has_aggregate(e) for e, _ in select.items) \
         or (select.having is not None and has_aggregate(select.having)) \
         or any(has_aggregate(e) for e, _ in select.order_by)
+    if windows and aggregated:
+        raise SquealError("window functions cannot be mixed with GROUP BY "
+                          "or aggregates yet")
 
     if aggregated:
         groups = {}
@@ -341,6 +459,11 @@ def execute(select, source):
         contexts = [RowContext(schema, r, resolve) for r in rows]
         if select.having is not None:
             raise SquealError("HAVING needs GROUP BY or an aggregate")
+        if windows:
+            computed = compute_windows(windows, schema, rows, resolve)
+            for i, ctx in enumerate(contexts):
+                ctx.window_values = {node_id: vals[i]
+                                     for node_id, vals in computed.items()}
 
     out_columns, project = _projection(select, columns)
     projected = []

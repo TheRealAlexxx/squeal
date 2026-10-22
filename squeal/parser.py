@@ -358,43 +358,47 @@ class Parser:
                 if self.at_op("*"):
                     self.advance()
                     self.expect_op(")")
-                    return ast.FuncCall(parts[0], [], star=True)
-                distinct = False
-                if self.at_kw("distinct"):
-                    self.advance()
-                    distinct = True
-                args = []
-                if not self.at_op(")"):
-                    args.append(self.parse_expr())
-                    while self.at_op(","):
+                    call = ast.FuncCall(parts[0], [], star=True)
+                else:
+                    distinct = False
+                    if self.at_kw("distinct"):
                         self.advance()
+                        distinct = True
+                    args = []
+                    if not self.at_op(")"):
                         args.append(self.parse_expr())
-                self.expect_op(")")
-                call = ast.FuncCall(parts[0], args, distinct=distinct)
-                if self.at_kw("over"):
-                    self.advance()
-                    self.expect_op("(")
-                    partition_by = []
-                    if self.at_kw("partition"):
-                        self.advance()
-                        self.expect_kw("by")
-                        partition_by.append(self.parse_expr())
                         while self.at_op(","):
                             self.advance()
-                            partition_by.append(self.parse_expr())
-                    order_by = []
-                    if self.at_kw("order"):
-                        self.advance()
-                        self.expect_kw("by")
-                        order_by.append(self.parse_order_item())
-                        while self.at_op(","):
-                            self.advance()
-                            order_by.append(self.parse_order_item())
+                            args.append(self.parse_expr())
                     self.expect_op(")")
-                    return ast.WindowCall(call, partition_by, order_by)
+                    call = ast.FuncCall(parts[0], args, distinct=distinct)
+                if self.at_kw("over"):
+                    return self.parse_window(call)
                 return call
             return ast.Column(".".join(parts))
         self.fail("expected a value but found %r" % (tok.text or "end of input"), tok)
+
+    def parse_window(self, call):
+        self.expect_kw("over")
+        self.expect_op("(")
+        partition_by = []
+        if self.at_kw("partition"):
+            self.advance()
+            self.expect_kw("by")
+            partition_by.append(self.parse_expr())
+            while self.at_op(","):
+                self.advance()
+                partition_by.append(self.parse_expr())
+        order_by = []
+        if self.at_kw("order"):
+            self.advance()
+            self.expect_kw("by")
+            order_by.append(self.parse_order_item())
+            while self.at_op(","):
+                self.advance()
+                order_by.append(self.parse_order_item())
+        self.expect_op(")")
+        return ast.WindowCall(call, partition_by, order_by)
 
     def parse_case(self):
         self.expect_kw("case")

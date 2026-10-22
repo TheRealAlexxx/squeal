@@ -41,6 +41,14 @@ def to_sql(node):
         return "(subquery)"
     if isinstance(node, ast.Exists):
         return "EXISTS (subquery)"
+    if isinstance(node, ast.WindowCall):
+        parts = []
+        if node.partition_by:
+            parts.append("PARTITION BY " + ", ".join(to_sql(e) for e in node.partition_by))
+        if node.order_by:
+            parts.append("ORDER BY " + ", ".join(
+                to_sql(e) + (" DESC" if d else "") for e, d in node.order_by))
+        return "%s OVER (%s)" % (to_sql(node.call), " ".join(parts))
     if isinstance(node, ast.Case):
         parts = ["CASE"]
         for cond, val in node.whens:
