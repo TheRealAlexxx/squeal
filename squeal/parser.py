@@ -48,9 +48,14 @@ class Parser:
     # entry point ---------------------------------------------------------
 
     def parse(self):
+        explain = False
+        if self.at_kw("explain"):
+            self.advance()
+            explain = True
         stmt = self.parse_select()
         if self.cur.kind != END:
             self.fail("unexpected %r after the end of the query" % self.cur.text)
+        stmt.explain = explain
         return stmt
 
     def parse_select(self):

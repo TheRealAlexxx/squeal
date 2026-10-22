@@ -12,7 +12,11 @@ class Node:
     def walk(self):
         """Yield this node and every descendant, depth first."""
         yield self
-        for value in vars(self).values():
+        slots = []
+        for klass in type(self).__mro__:
+            slots.extend(getattr(klass, "__slots__", ()))
+        for slot in slots:
+            value = getattr(self, slot)
             if isinstance(value, Node):
                 yield from value.walk()
             elif isinstance(value, (list, tuple)):
@@ -148,10 +152,11 @@ class Case(Node):
 
 class Select(Node):
     __slots__ = ("distinct", "items", "source", "where", "group_by",
-                 "having", "order_by", "limit", "offset")
+                 "having", "order_by", "limit", "offset", "explain")
 
     def __init__(self, distinct, items, source, where, group_by, having,
-                 order_by, limit, offset):
+                 order_by, limit, offset, explain=False):
+        self.explain = explain
         self.distinct = distinct
         self.items = items          # [(expr, alias or None)]
         self.source = source        # table name or 'file.csv' (string keeps its literal quotes off)
