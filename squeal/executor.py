@@ -143,6 +143,53 @@ def _qualifier_for(name):
     return base
 
 
+def scan_schema(node, resolve):
+    """The schema a source tree produces, without reading any rows."""
+    if isinstance(node, ast.TableRef):
+        table = resolve(node.name)
+        qual = node.alias or _qualifier_for(node.name)
+        return Schema([(qual, c) for c in table.columns])
+    if isinstance(node, ast.Join):
+        return scan_schema(node.left, resolve).merge(scan_schema(node.right, resolve))
+    raise SquealError("cannot scan %r" % (node,))
+
+
+def _refs_within(expr, schema):
+    """True when every column under expr resolves inside schema."""
+    cols = [n for n in expr.walk() if isinstance(n, ast.Column)]
+    if not cols:
+        return False
+    for col in cols:
+        try:
+            schema.resolve(col.name)
+        except SquealError:
+            return False
+    return True
+
+
+def equijoin_keys(on, left_schema, right_schema):
+    """Split `a = b` into (left-side expr, right-side expr), or None."""
+    if not isinstance(on, ast.Binary) or on.op != "=":
+        return None
+    if _refs_within(on.left, left_schema) and _refs_within(on.right, right_schema):
+        return on.left, on.right
+    if _refs_within(on.left, right_schema) and _refs_within(on.right, left_schema):
+        return on.right, on.left
+    return None
+
+
+def _hashable(value):
+    if isinstance(value, bool):
+        return int(value)
+    return value
+
+
+def join_strategy(node, left_schema, right_schema):
+    if node.kind == "cross" or node.on is None:
+        return "nested loop"
+    return "hash" if equijoin_keys(node.on, left_schema, right_schema) else "nested loop"
+
+
 def scan_source(node, resolve):
     """Turn a TableRef/Join tree into a (Schema, rows) pair."""
     if isinstance(node, ast.TableRef):
@@ -153,6 +200,11 @@ def scan_source(node, resolve):
         left_schema, left_rows = scan_source(node.left, resolve)
         right_schema, right_rows = scan_source(node.right, resolve)
         schema = left_schema.merge(right_schema)
+        keys = None if node.kind == "cross" else             equijoin_keys(node.on, left_schema, right_schema)
+        if keys is not None:
+            return schema, _hash_join(node, keys, schema,
+                                      left_schema, left_rows,
+                                      right_schema, right_rows)
         rows = []
         for lrow in left_rows:
             matched = False
@@ -166,6 +218,32 @@ def scan_source(node, resolve):
                 rows.append(lrow + (None,) * len(right_schema))
         return schema, rows
     raise SquealError("cannot scan %r" % (node,))
+
+
+def _hash_join(node, keys, schema, left_schema, left_rows,
+               right_schema, right_rows):
+    """Build a hash of the right side on the join key, probe with the left.
+
+    NULL keys never match, matching SQL's refusal to call NULL = NULL.
+    """
+    lexpr, rexpr = keys
+    buckets = {}
+    for rrow in right_rows:
+        key = _hashable(eval_expr(rexpr, RowContext(right_schema, rrow)))
+        if key is None:
+            continue
+        buckets.setdefault(key, []).append(rrow)
+    rows = []
+    for lrow in left_rows:
+        key = _hashable(eval_expr(lexpr, RowContext(left_schema, lrow)))
+        matches = buckets.get(key, []) if key is not None else []
+        matched = False
+        for rrow in matches:
+            matched = True
+            rows.append(lrow + rrow)
+        if not matched and node.kind == "left":
+            rows.append(lrow + (None,) * len(right_schema))
+    return rows
 
 
 def execute(select, source):

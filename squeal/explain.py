@@ -19,7 +19,26 @@ def source_sql(node):
                                     source_sql(node.right), to_sql(node.on))
 
 
-def plan(select):
+def scan_stages(node, resolve=None):
+    """Innermost-first Scan/Join stages for the source tree."""
+    if isinstance(node, ast.TableRef):
+        return ["Scan  " + source_sql(node)]
+    stages = scan_stages(node.left, resolve)
+    if node.kind == "cross":
+        stages.append("Nested Loop Join  %s (cross)" % source_sql(node.right))
+        return stages
+    strategy = "Nested Loop"
+    if resolve is not None:
+        from .executor import scan_schema, join_strategy
+        if join_strategy(node, scan_schema(node.left, resolve),
+                         scan_schema(node.right, resolve)) == "hash":
+            strategy = "Hash"
+    stages.append("%s Join  %s on %s" % (strategy, source_sql(node.right),
+                                         to_sql(node.on)))
+    return stages
+
+
+def plan(select, resolve=None):
     """Return the EXPLAIN tree as a list of (depth, text) lines."""
     lines = []
     depth = 0
@@ -59,16 +78,20 @@ def plan(select):
         stage("Filter  " + to_sql(select.where))
         depth += 1
     if select.source:
-        stage("Scan  " + source_sql(select.source))
+        # scan_stages is innermost-first; we append outermost-first and
+        # reverse everything at the end
+        for text in reversed(scan_stages(select.source, resolve)):
+            stage(text)
+            depth += 1
     else:
         stage("Compute  (no table)")
     lines.reverse()
     return lines
 
 
-def render(select):
+def render(select, resolve=None):
     # the pipeline is a strict chain: position in the list is the depth
-    lines = plan(select)
+    lines = plan(select, resolve)
     out = []
     for i, (_, text) in enumerate(lines):
         out.append(text if i == 0 else "  " * (i - 1) + "-> " + text)

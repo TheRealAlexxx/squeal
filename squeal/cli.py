@@ -44,7 +44,7 @@ class Session:
         if select.explain:
             for ref in table_refs(select.source):
                 self.resolve(ref.name)  # fail early on a bad path
-            return render_plan(select)
+            return render_plan(select, self.resolve)
         if select.source is None:
             # no FROM: one row computed from thin air
             from .csvload import CsvTable

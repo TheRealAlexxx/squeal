@@ -91,3 +91,44 @@ class JoinTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JoinStrategyTests(unittest.TestCase):
+    def test_equijoin_uses_hash(self):
+        from squeal.executor import scan_schema, join_strategy
+        q = parse("select 1 from customers c join purchases p on c.id = p.customer_id")
+        strategy = join_strategy(q.source, scan_schema(q.source.left, resolver),
+                                 scan_schema(q.source.right, resolver))
+        self.assertEqual(strategy, "hash")
+
+    def test_non_equality_falls_back(self):
+        from squeal.executor import scan_schema, join_strategy
+        q = parse("select 1 from customers c join purchases p on c.id < p.customer_id")
+        strategy = join_strategy(q.source, scan_schema(q.source.left, resolver),
+                                 scan_schema(q.source.right, resolver))
+        self.assertEqual(strategy, "nested loop")
+
+    def test_anded_condition_falls_back(self):
+        from squeal.executor import scan_schema, join_strategy
+        q = parse("select 1 from customers c join purchases p "
+                  "on c.id = p.customer_id and p.amount > 10")
+        strategy = join_strategy(q.source, scan_schema(q.source.left, resolver),
+                                 scan_schema(q.source.right, resolver))
+        self.assertEqual(strategy, "nested loop")
+
+    def test_hash_join_null_keys_never_match(self):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "ghost.csv")
+        with open(path, "w") as fh:
+            fh.write("customer_id,item\n,keyboard\n")
+        r = execute(parse("select count(*) from customers join '%s' g "
+                          "on customers.id = g.customer_id" % path), resolver)
+        self.assertEqual(r.rows[0][0], 0)
+
+    def test_hash_join_matches_nested_loop(self):
+        sql = "select c.name, p.item from customers c join purchases p " \
+              "on c.id = p.customer_id order by p.id"
+        r = run(sql)
+        self.assertEqual([row[1] for row in r.rows],
+                         ["keyboard", "mouse", "monitor", "cable"])
+
