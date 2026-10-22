@@ -15,10 +15,11 @@ from .values import (AGGREGATES, SCALAR_FUNCTIONS, arith, compare, like,
 class RowContext:
     """One row: column lookups come from this row only."""
 
-    def __init__(self, schema, row, resolve=None):
+    def __init__(self, schema, row, resolve=None, exec_cache=None):
         self.schema = schema
         self.row = row
         self.resolve = resolve
+        self.exec_cache = exec_cache if exec_cache is not None else {}
         self.window_values = {}  # id(WindowCall) -> value, precomputed
 
     def get(self, name):
@@ -32,10 +33,11 @@ class GroupContext:
     """A whole group of rows: aggregates see every row, anything else
     reads the first one (the SQLite convention for bare columns)."""
 
-    def __init__(self, schema, rows, resolve=None):
+    def __init__(self, schema, rows, resolve=None, exec_cache=None):
         self.schema = schema
         self.group = rows
         self.resolve = resolve
+        self.exec_cache = exec_cache if exec_cache is not None else {}
 
     def get(self, name):
         return self.group[0][self.schema.resolve(name)]
@@ -120,16 +122,19 @@ def eval_expr(node, ctx):
     if isinstance(node, ast.Subquery):
         return _run_subquery(node.select, ctx)
     if isinstance(node, ast.Exists):
-        if ctx.resolve is None:
-            raise SquealError("EXISTS needs a table source")
-        return len(execute(node.select, ctx.resolve).rows) > 0
+        return len(_subquery_rows(node.select, ctx).rows) > 0
     raise SquealError("cannot evaluate %r" % (node,))
 
 
 def _subquery_rows(select, ctx):
     if ctx.resolve is None:
         raise SquealError("subqueries need a table source")
-    return execute(select, ctx.resolve)
+    # uncorrelated subqueries (the only kind supported) are pure: run once
+    # per statement, not once per outer row
+    key = id(select)
+    if key not in ctx.exec_cache:
+        ctx.exec_cache[key] = execute(select, ctx.resolve, exec_cache=ctx.exec_cache)
+    return ctx.exec_cache[key]
 
 
 def _run_subquery(select, ctx):
@@ -151,7 +156,7 @@ def eval_call(node, ctx):
         if node.star:
             values = ctx.rows()
         else:
-            values = [eval_expr(node.args[0], RowContext(ctx.schema, row, ctx.resolve))
+            values = [eval_expr(node.args[0], RowContext(ctx.schema, row, ctx.resolve, ctx.exec_cache))
                       for row in ctx.rows()]
         if node.distinct:
             seen = set()
@@ -222,7 +227,7 @@ def find_windows(select):
     return found
 
 
-def compute_windows(calls, schema, rows, resolve):
+def compute_windows(calls, schema, rows, resolve, exec_cache=None):
     """Precompute every window call: {id(node): [value per input row]}.
 
     Frame semantics: with an ORDER BY the frame is the partition start
@@ -238,7 +243,7 @@ def compute_windows(calls, schema, rows, resolve):
             raise SquealError("%s() takes no arguments" % name)
         if call.call.distinct:
             raise SquealError("DISTINCT is not supported in window functions")
-        ctxs = [RowContext(schema, r, resolve) for r in rows]
+        ctxs = [RowContext(schema, r, resolve, exec_cache) for r in rows]
         pkeys = [tuple(eval_expr(e, c) for e in call.partition_by) for c in ctxs]
         okeys = [[eval_expr(e, c) for e, _ in call.order_by] for c in ctxs]
         descs = [d for _, d in call.order_by]
@@ -410,8 +415,11 @@ def _hash_join(node, keys, schema, left_schema, left_rows,
     return rows
 
 
-def execute(select, source, stats=None):
-    # stats, when given, collects per-stage row counts for EXPLAIN ANALYZE
+def execute(select, source, stats=None, exec_cache=None):
+    # stats, when given, collects per-stage row counts for EXPLAIN ANALYZE;
+    # exec_cache shares subquery results across the whole statement
+    if exec_cache is None:
+        exec_cache = {}
     if hasattr(source, "columns"):
         # a bare table: single-source queries only
         resolve = lambda _name, t=source: t
@@ -440,7 +448,7 @@ def execute(select, source, stats=None):
 
     if select.where is not None:
         rows = [r for r in rows
-                if truthy(eval_expr(select.where, RowContext(schema, r, resolve))) is True]
+                if truthy(eval_expr(select.where, RowContext(schema, r, resolve, exec_cache))) is True]
     if stats is not None:
         stats["filter"] = len(rows)
 
@@ -456,7 +464,7 @@ def execute(select, source, stats=None):
         groups = {}
         order = []
         for r in rows:
-            key = tuple(eval_expr(e, RowContext(schema, r, resolve)) for e in select_group_by)
+            key = tuple(eval_expr(e, RowContext(schema, r, resolve, exec_cache)) for e in select_group_by)
             if key not in groups:
                 groups[key] = []
                 order.append(key)
@@ -469,16 +477,16 @@ def execute(select, source, stats=None):
         elif not select.group_by and not rows:
             order = [()]  # count(*) over empty input is still one row: 0
             groups[()] = []
-        contexts = [GroupContext(schema, groups[k], resolve) for k in order]
+        contexts = [GroupContext(schema, groups[k], resolve, exec_cache) for k in order]
         if select.having is not None:
             contexts = [c for c in contexts
                         if truthy(eval_expr(select.having, c)) is True]
     else:
-        contexts = [RowContext(schema, r, resolve) for r in rows]
+        contexts = [RowContext(schema, r, resolve, exec_cache) for r in rows]
         if select.having is not None:
             raise SquealError("HAVING needs GROUP BY or an aggregate")
         if windows:
-            computed = compute_windows(windows, schema, rows, resolve)
+            computed = compute_windows(windows, schema, rows, resolve, exec_cache)
             for i, ctx in enumerate(contexts):
                 ctx.window_values = {node_id: vals[i]
                                      for node_id, vals in computed.items()}
