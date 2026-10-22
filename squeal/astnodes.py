@@ -216,11 +216,12 @@ def to_join_repr(node):
 
 class Select(Node):
     __slots__ = ("distinct", "items", "source", "where", "group_by",
-                 "having", "order_by", "limit", "offset", "explain")
+                 "having", "order_by", "limit", "offset", "explain", "analyze")
 
     def __init__(self, distinct, items, source, where, group_by, having,
-                 order_by, limit, offset, explain=False):
+                 order_by, limit, offset, explain=False, analyze=False):
         self.explain = explain
+        self.analyze = analyze
         self.distinct = distinct
         self.items = items          # [(expr, alias or None)]
         self.source = source        # TableRef, Join, or None

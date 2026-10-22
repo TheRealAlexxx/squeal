@@ -410,7 +410,8 @@ def _hash_join(node, keys, schema, left_schema, left_rows,
     return rows
 
 
-def execute(select, source):
+def execute(select, source, stats=None):
+    # stats, when given, collects per-stage row counts for EXPLAIN ANALYZE
     if hasattr(source, "columns"):
         # a bare table: single-source queries only
         resolve = lambda _name, t=source: t
@@ -420,11 +421,15 @@ def execute(select, source):
         schema, rows = Schema([]), [()]
     else:
         schema, rows = scan_source(select.source, resolve)
+    if stats is not None:
+        stats["scan"] = len(rows)
     columns = schema.names
 
     if select.where is not None:
         rows = [r for r in rows
                 if truthy(eval_expr(select.where, RowContext(schema, r, resolve))) is True]
+    if stats is not None:
+        stats["filter"] = len(rows)
 
     windows = find_windows(select)
     aggregated = bool(select.group_by) or any(has_aggregate(e) for e, _ in select.items) \
@@ -465,6 +470,8 @@ def execute(select, source):
                 ctx.window_values = {node_id: vals[i]
                                      for node_id, vals in computed.items()}
 
+    if stats is not None:
+        stats["contexts"] = len(contexts)
     out_columns, project = _projection(select, columns)
     projected = []
     order_keys = []
@@ -496,9 +503,14 @@ def execute(select, source):
                 unique.append(row)
         projected = unique
 
+    if stats is not None:
+        stats["projected"] = len(projected)
     start = select.offset or 0
     end = None if select.limit is None else start + select.limit
-    return Result(out_columns, projected[start:end])
+    result = Result(out_columns, projected[start:end])
+    if stats is not None:
+        stats["rows"] = len(result.rows)
+    return result
 
 
 def _cmp_rows(a, b, descs):

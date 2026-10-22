@@ -51,15 +51,20 @@ class Parser:
         while self.cur.kind == SEMI:
             self.advance()
         explain = False
+        analyze = False
         if self.at_kw("explain"):
             self.advance()
             explain = True
+            if self.at_kw("analyze"):
+                self.advance()
+                analyze = True
         stmt = self.parse_select()
         while self.cur.kind == SEMI:
             self.advance()
         if self.cur.kind != END:
             self.fail("unexpected %r after the end of the query" % self.cur.text)
         stmt.explain = explain
+        stmt.analyze = analyze
         return stmt
 
     def parse_many(self):

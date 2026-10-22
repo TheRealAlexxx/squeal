@@ -89,6 +89,35 @@ def plan(select, resolve=None):
     return lines
 
 
+def render_analyzed(select, resolve, stats, elapsed_ms):
+    """The plan with the measured row counts attached to each stage."""
+    lines = plan(select, resolve)
+    out = []
+    join_seen = False
+    table_counts = iter(stats.get("table_rows", []))
+    for i, (_, text) in enumerate(lines):
+        note = ""
+        if text.startswith("Scan  "):
+            count = next(table_counts, None)
+            if count is not None:
+                note = "%d rows" % count
+        elif text.startswith(("Hash Join", "Nested Loop Join")) and not join_seen:
+            join_seen = True
+            note = "%d joined rows" % stats.get("scan", 0)
+        elif text.startswith("Filter"):
+            note = "%d in, %d out" % (stats.get("scan", 0), stats.get("filter", 0))
+        elif text.startswith("Aggregate"):
+            note = "%d groups" % stats.get("contexts", 0)
+        elif text.startswith("Project"):
+            note = "%d rows" % stats.get("projected", 0)
+        elif text.startswith("Limit"):
+            note = "%d rows" % stats.get("rows", 0)
+        prefix = text if i == 0 else "  " * (i - 1) + "-> " + text
+        out.append(prefix + ("   -- " + note if note else ""))
+    out.append("elapsed: %.1f ms" % elapsed_ms)
+    return "\n".join(out)
+
+
 def render(select, resolve=None):
     # the pipeline is a strict chain: position in the list is the depth
     lines = plan(select, resolve)

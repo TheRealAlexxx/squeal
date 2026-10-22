@@ -44,6 +44,15 @@ class Session:
         if select.explain:
             for ref in table_refs(select.source):
                 self.resolve(ref.name)  # fail early on a bad path
+            if select.analyze:
+                import time
+                from .explain import render_analyzed
+                stats = {"table_rows": [len(self.resolve(ref.name).rows)
+                                        for ref in table_refs(select.source)]}
+                start = time.perf_counter()
+                execute(select, self.resolve, stats)
+                elapsed = (time.perf_counter() - start) * 1000
+                return render_analyzed(select, self.resolve, stats, elapsed)
             return render_plan(select, self.resolve)
         if select.source is None:
             # no FROM: one row computed from thin air

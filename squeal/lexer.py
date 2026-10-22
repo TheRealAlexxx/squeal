@@ -13,7 +13,7 @@ KEYWORDS = {
     "desc", "distinct", "case", "when", "then", "else", "end", "in", "is",
     "like", "between",
     "explain", "join", "inner", "left", "outer", "on", "cross", "exists",
-    "over", "partition",
+    "over", "partition", "analyze",
 }
 
 TWO_CHAR_OPS = ("!=", "<>", "<=", ">=", "||")
