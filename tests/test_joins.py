@@ -13,7 +13,8 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
 
 def resolver(name):
-    return load(os.path.join(FIXTURES, name + ".csv"))
+    path = name if os.path.exists(name) else os.path.join(FIXTURES, name + ".csv")
+    return load(path)
 
 
 def run(sql):
