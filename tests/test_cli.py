@@ -119,3 +119,32 @@ class ViewTests(unittest.TestCase):
         r = cli(stdin="drop view if exists ghost;\nselect 1;\n")
         self.assertEqual(r.returncode, 0, r.stderr)
 
+
+
+class ReplMetaCommandTests(unittest.TestCase):
+    def test_show_known_empty(self):
+        import io
+        from contextlib import redirect_stdout
+        from squeal.cli import Session, _show_known
+        out = io.StringIO()
+        with redirect_stdout(out):
+            _show_known(Session(), ".tables")
+            _show_known(Session(), ".views")
+        self.assertIn("no tables", out.getvalue())
+        self.assertIn("no views", out.getvalue())
+
+    def test_show_known_populated(self):
+        import io
+        from contextlib import redirect_stdout
+        from squeal.cli import Session, _show_known
+        from squeal.parser import parse
+        session = Session()
+        session.run_statement(parse(
+            "create view londoners as select * from '%s' where city = 'London'" % FIXTURE))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            _show_known(session, ".tables")
+            _show_known(session, ".views")
+        self.assertIn("people.csv  (6 rows)", out.getvalue())
+        self.assertIn("londoners", out.getvalue())
+

@@ -126,6 +126,9 @@ def repl(session, fmt):
         stripped = line.strip()
         if not buf and stripped in (".quit", ".exit", "\\q"):
             break
+        if not buf and stripped in (".tables", ".views"):
+            _show_known(session, stripped)
+            continue
         buf += line + "\n"
         if not stripped.endswith(";"):
             continue
@@ -139,6 +142,22 @@ def repl(session, fmt):
             print(e.render(sql), file=sys.stderr)
         except OSError as e:
             print("error: %s" % e, file=sys.stderr)
+
+
+def _show_known(session, command):
+    """.tables lists loaded CSV tables, .views lists the session's views."""
+    if command == ".tables":
+        if not session.tables:
+            print("(no tables loaded yet - query a CSV first)")
+            return
+        for name, table in session.tables.items():
+            print("%s  (%d rows)" % (name, len(table.rows)))
+    else:
+        if not session.views:
+            print("(no views yet - create one with CREATE VIEW name AS select ...)")
+            return
+        for name in session.views:
+            print(name)
 
 
 def main(argv=None):
