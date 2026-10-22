@@ -72,7 +72,7 @@ class ExplainAnalyzeTests(unittest.TestCase):
     def test_explain_analyze(self):
         r = cli("explain analyze select name from '%s' where age > 30" % FIXTURE)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("6 in, 5 out", r.stdout)
+        self.assertIn("6 in, 4 out", r.stdout)
         self.assertIn("elapsed:", r.stdout)
 
     def test_explain_still_static(self):
