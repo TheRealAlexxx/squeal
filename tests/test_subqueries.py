@@ -90,3 +90,38 @@ class ExistsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CorrelatedTests(unittest.TestCase):
+    def test_correlated_scalar(self):
+        r = run("select name from customers c where "
+                "(select sum(amount) from purchases p where p.customer_id = c.id) > 100")
+        self.assertEqual([row[0] for row in r.rows], ["Ada", "Alan"])
+
+    def test_correlated_exists(self):
+        r = run("select name from customers c where exists "
+                "(select 1 from purchases p where p.customer_id = c.id and p.amount > 300)")
+        self.assertEqual(r.rows, [("Alan",)])
+
+    def test_correlated_not_exists(self):
+        r = run("select name from customers c where not exists "
+                "(select 1 from purchases p where p.customer_id = c.id)")
+        self.assertEqual(r.rows, [("Edsger",)])
+
+    def test_correlated_in_select_list(self):
+        r = run("select name, (select count(*) from purchases p "
+                "where p.customer_id = c.id) as n from customers c order by c.id")
+        self.assertEqual([row[1] for row in r.rows], [2, 1, 1, 0])
+
+    def test_inner_column_shadows_outer(self):
+        # purchases.id means the inner one, not customers.id
+        r = run("select name from customers c where exists "
+                "(select 1 from purchases p where p.customer_id = c.id and p.id = 103)")
+        self.assertEqual(r.rows, [("Alan",)])
+
+    def test_uncorrelated_still_cached(self):
+        # shape check: an uncorrelated subquery in a big IN runs once
+        r = run("select count(*) from purchases where customer_id in "
+                "(select id from customers)")
+        self.assertEqual(r.rows[0][0], 4)
+

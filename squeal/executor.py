@@ -15,15 +15,21 @@ from .values import (AGGREGATES, SCALAR_FUNCTIONS, arith, compare, like,
 class RowContext:
     """One row: column lookups come from this row only."""
 
-    def __init__(self, schema, row, resolve=None, exec_cache=None):
+    def __init__(self, schema, row, resolve=None, exec_cache=None, outer=None):
         self.schema = schema
         self.row = row
         self.resolve = resolve
         self.exec_cache = exec_cache if exec_cache is not None else {}
         self.window_values = {}  # id(WindowCall) -> value, precomputed
+        self.outer = outer
 
     def get(self, name):
-        return self.row[self.schema.resolve(name)]
+        try:
+            return self.row[self.schema.resolve(name)]
+        except SquealError:
+            if self.outer is not None:
+                return self.outer.get(name)
+            raise
 
     def rows(self):
         return [self.row]
@@ -33,14 +39,20 @@ class GroupContext:
     """A whole group of rows: aggregates see every row, anything else
     reads the first one (the SQLite convention for bare columns)."""
 
-    def __init__(self, schema, rows, resolve=None, exec_cache=None):
+    def __init__(self, schema, rows, resolve=None, exec_cache=None, outer=None):
         self.schema = schema
         self.group = rows
         self.resolve = resolve
         self.exec_cache = exec_cache if exec_cache is not None else {}
+        self.outer = outer
 
     def get(self, name):
-        return self.group[0][self.schema.resolve(name)]
+        try:
+            return self.group[0][self.schema.resolve(name)]
+        except SquealError:
+            if self.outer is not None:
+                return self.outer.get(name)
+            raise
 
     def rows(self):
         return self.group
@@ -126,11 +138,38 @@ def eval_expr(node, ctx):
     raise SquealError("cannot evaluate %r" % (node,))
 
 
+def _is_correlated(select, resolve):
+    """True when the inner query names a column its own sources lack.
+
+    Errs toward correlated: a misclassified nested subquery just runs
+    without caching, never with wrong results.
+    """
+    if select.source is None:
+        inner_names = set()
+    else:
+        schema = scan_schema(select.source, resolve)
+        inner_names = set(schema.names)
+        inner_names.update("%s.%s" % (q, n) for q, n in schema.pairs if q)
+    exprs = [e for e, _ in select.items] + [e for e, _ in select.order_by]
+    exprs += select.group_by
+    if select.where is not None:
+        exprs.append(select.where)
+    if select.having is not None:
+        exprs.append(select.having)
+    for expr in exprs:
+        for node in expr.walk():
+            if isinstance(node, ast.Column) and node.name not in inner_names:
+                return True
+    return False
+
+
 def _subquery_rows(select, ctx):
     if ctx.resolve is None:
         raise SquealError("subqueries need a table source")
-    # uncorrelated subqueries (the only kind supported) are pure: run once
-    # per statement, not once per outer row
+    if _is_correlated(select, ctx.resolve):
+        # correlated: runs once per outer row, sees the outer scope
+        return execute(select, ctx.resolve, exec_cache=ctx.exec_cache, outer=ctx)
+    # uncorrelated: pure, so run once per statement
     key = id(select)
     if key not in ctx.exec_cache:
         ctx.exec_cache[key] = execute(select, ctx.resolve, exec_cache=ctx.exec_cache)
@@ -204,12 +243,13 @@ def _child_nodes(node):
 
 
 def has_aggregate(node):
-    """True when a plain (non-window) aggregate call appears below node.
+    """True when a plain aggregate call appears below node in THIS scope.
 
-    Aggregates inside a WindowCall belong to the window; they do not
-    turn the whole query into a GROUP BY query.
+    Aggregates inside a WindowCall belong to the window, and aggregates
+    inside a Subquery or Exists belong to the inner query; neither turns
+    this query into a GROUP BY query.
     """
-    if isinstance(node, ast.WindowCall):
+    if isinstance(node, (ast.WindowCall, ast.Subquery, ast.Exists)):
         return False
     if isinstance(node, ast.FuncCall) and node.name.lower() in AGGREGATES:
         return True
@@ -415,9 +455,10 @@ def _hash_join(node, keys, schema, left_schema, left_rows,
     return rows
 
 
-def execute(select, source, stats=None, exec_cache=None):
+def execute(select, source, stats=None, exec_cache=None, outer=None):
     # stats, when given, collects per-stage row counts for EXPLAIN ANALYZE;
-    # exec_cache shares subquery results across the whole statement
+    # exec_cache shares subquery results across the whole statement;
+    # outer is the enclosing query's context for correlated subqueries
     if exec_cache is None:
         exec_cache = {}
     if hasattr(source, "columns"):
@@ -448,7 +489,7 @@ def execute(select, source, stats=None, exec_cache=None):
 
     if select.where is not None:
         rows = [r for r in rows
-                if truthy(eval_expr(select.where, RowContext(schema, r, resolve, exec_cache))) is True]
+                if truthy(eval_expr(select.where, RowContext(schema, r, resolve, exec_cache, outer))) is True]
     if stats is not None:
         stats["filter"] = len(rows)
 
@@ -464,7 +505,7 @@ def execute(select, source, stats=None, exec_cache=None):
         groups = {}
         order = []
         for r in rows:
-            key = tuple(eval_expr(e, RowContext(schema, r, resolve, exec_cache)) for e in select_group_by)
+            key = tuple(eval_expr(e, RowContext(schema, r, resolve, exec_cache, outer)) for e in select_group_by)
             if key not in groups:
                 groups[key] = []
                 order.append(key)
@@ -477,12 +518,12 @@ def execute(select, source, stats=None, exec_cache=None):
         elif not select.group_by and not rows:
             order = [()]  # count(*) over empty input is still one row: 0
             groups[()] = []
-        contexts = [GroupContext(schema, groups[k], resolve, exec_cache) for k in order]
+        contexts = [GroupContext(schema, groups[k], resolve, exec_cache, outer) for k in order]
         if select.having is not None:
             contexts = [c for c in contexts
                         if truthy(eval_expr(select.having, c)) is True]
     else:
-        contexts = [RowContext(schema, r, resolve, exec_cache) for r in rows]
+        contexts = [RowContext(schema, r, resolve, exec_cache, outer) for r in rows]
         if select.having is not None:
             raise SquealError("HAVING needs GROUP BY or an aggregate")
         if windows:
