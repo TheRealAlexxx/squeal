@@ -425,6 +425,19 @@ def execute(select, source, stats=None):
         stats["scan"] = len(rows)
     columns = schema.names
 
+    # positional references: ORDER BY 2 / GROUP BY 1 mean select items
+    def positional(expr):
+        if isinstance(expr, ast.Literal) and isinstance(expr.value, int) \
+                and not isinstance(expr.value, bool):
+            if 1 <= expr.value <= len(select.items):
+                return select.items[expr.value - 1][0]
+            raise SquealError("positional reference %d is out of range: "
+                              "the query selects %d item(s)"
+                              % (expr.value, len(select.items)))
+        return expr
+    select_group_by = [positional(e) for e in select.group_by]
+    select_order_by = [(positional(e), d) for e, d in select.order_by]
+
     if select.where is not None:
         rows = [r for r in rows
                 if truthy(eval_expr(select.where, RowContext(schema, r, resolve))) is True]
@@ -443,7 +456,7 @@ def execute(select, source, stats=None):
         groups = {}
         order = []
         for r in rows:
-            key = tuple(eval_expr(e, RowContext(schema, r, resolve)) for e in select.group_by)
+            key = tuple(eval_expr(e, RowContext(schema, r, resolve)) for e in select_group_by)
             if key not in groups:
                 groups[key] = []
                 order.append(key)
@@ -479,7 +492,7 @@ def execute(select, source, stats=None):
         row = tuple(project(ctx))
         projected.append(row)
         keys = []
-        for expr, _ in select.order_by:
+        for expr, _ in select_order_by:
             # ORDER BY may name a select alias or output column
             if isinstance(expr, ast.Column) and expr.name in out_columns:
                 keys.append(row[out_columns.index(expr.name)])
@@ -488,9 +501,9 @@ def execute(select, source, stats=None):
         order_keys.append(keys)
 
     pairs = list(zip(projected, order_keys))
-    if select.order_by:
+    if select_order_by:
         from functools import cmp_to_key
-        descs = [d for _, d in select.order_by]
+        descs = [d for _, d in select_order_by]
         pairs.sort(key=cmp_to_key(lambda a, b: _cmp_rows(a[1], b[1], descs)))
     projected = [p for p, _ in pairs]
 

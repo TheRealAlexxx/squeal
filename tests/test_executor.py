@@ -187,3 +187,19 @@ class ShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PositionalTests(unittest.TestCase):
+    def test_order_by_position(self):
+        r = run("select city, count(*) from people group by city order by 2 desc")
+        self.assertEqual(r.rows[0], ("London", 3))
+
+    def test_group_by_position(self):
+        r = run("select city, count(*) from people group by 1 order by 1")
+        self.assertEqual([row[0] for row in r.rows],
+                         ["Amsterdam", "London", "New York"])
+
+    def test_position_out_of_range(self):
+        with self.assertRaises(SquealError):
+            run("select name from people order by 5")
+
