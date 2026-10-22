@@ -47,16 +47,9 @@ class Session:
             return render_plan(select)
         if select.source is None:
             # no FROM: one row computed from thin air
-            from .executor import Result, RowContext, _projection
             from .csvload import CsvTable
-            empty = CsvTable([], [()], [], "<memory>")
-            select.source = "<memory>"
-            return self._render(execute(select, empty))
-        return self._render(execute(select, self.resolve(select.source)))
-
-    def _render(self, result):
-        self.last_result = result
-        return result
+            return execute(select, CsvTable([], [()], [], "<memory>"))
+        return execute(select, self.resolve(select.source))
 
 
 FORMATS = {"table": as_table, "csv": as_csv, "json": as_json}
