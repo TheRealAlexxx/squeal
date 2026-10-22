@@ -15,7 +15,14 @@ SELECT [DISTINCT] select_item [, ...]
   [LIMIT n [OFFSET n]]
 
 EXPLAIN [ANALYZE] SELECT ...
+
+CREATE VIEW name AS SELECT ...
+DROP VIEW [IF EXISTS] name
 ```
+
+Views are session-level named queries. They validate when created,
+materialize fresh on every use, and may reference other views; a view
+that references itself is an error.
 
 A select item is `expr [AS alias]`, `*`, or a window call.
 

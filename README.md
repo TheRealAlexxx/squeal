@@ -86,6 +86,7 @@ elapsed: 0.2 ms
   `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] IN (...)`, `[NOT] BETWEEN`
 - Subqueries: `IN (SELECT ...)`, scalar subqueries, `EXISTS (SELECT ...)`,
   uncorrelated only, results cached per statement
+- `CREATE VIEW` / `DROP VIEW` for named queries in a session or script
 - `GROUP BY` and `HAVING`, with `count`, `sum`, `avg`, `min`, `max`,
   `group_concat`, all accepting `DISTINCT`
 - Window functions: `row_number()`, `rank()`, `dense_rank()`, and
