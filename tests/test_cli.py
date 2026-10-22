@@ -79,3 +79,43 @@ class ExplainAnalyzeTests(unittest.TestCase):
         r = cli("explain select name from '%s' where age > 30" % FIXTURE)
         self.assertNotIn("elapsed:", r.stdout)
 
+
+
+class ViewTests(unittest.TestCase):
+    def test_create_query_drop(self):
+        script = (
+            "create view londoners as select * from '%s' where city = 'London';\n"
+            "select name from londoners order by age;\n"
+            "drop view londoners;\n"
+            "select 1 from londoners;\n" % FIXTURE)
+        r = cli(stdin=script)
+        self.assertEqual(r.returncode, 1)  # last select fails after the drop
+        self.assertIn("view londoners created", r.stdout)
+        self.assertIn("Ada", r.stdout)
+        self.assertIn("no such table or file: londoners", r.stderr)
+
+    def test_view_over_view(self):
+        script = (
+            "create view londoners as select * from '%s' where city = 'London';\n"
+            "create view old_londoners as select * from londoners where age > 35;\n"
+            "select name from old_londoners order by name;\n" % FIXTURE)
+        r = cli(stdin=script)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Ada", r.stdout)
+        self.assertIn("Alan", r.stdout)
+        self.assertNotIn("Katherine", r.stdout)
+
+    def test_broken_view_fails_at_create(self):
+        r = cli(stdin="create view bad as select nope from '%s';\n" % FIXTURE)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no such column", r.stderr)
+
+    def test_drop_missing_view(self):
+        r = cli(stdin="drop view ghost;\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no such view", r.stderr)
+
+    def test_drop_if_exists(self):
+        r = cli(stdin="drop view if exists ghost;\nselect 1;\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+

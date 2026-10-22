@@ -214,6 +214,28 @@ def to_join_repr(node):
                                 to_join_repr(node.right))
 
 
+class CreateView(Node):
+    __slots__ = ("name", "select")
+
+    def __init__(self, name, select):
+        self.name = name
+        self.select = select
+
+    def __repr__(self):
+        return "CreateView(%s)" % self.name
+
+
+class DropView(Node):
+    __slots__ = ("name", "if_exists")
+
+    def __init__(self, name, if_exists):
+        self.name = name
+        self.if_exists = if_exists
+
+    def __repr__(self):
+        return "DropView(%s)" % self.name
+
+
 class Select(Node):
     __slots__ = ("distinct", "items", "source", "where", "group_by",
                  "having", "order_by", "limit", "offset", "explain", "analyze")

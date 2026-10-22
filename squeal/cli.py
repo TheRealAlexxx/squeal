@@ -20,12 +20,25 @@ from .render import as_csv, as_json, as_table
 
 
 class Session:
-    """Loaded tables, keyed by the name queries use for them."""
+    """Loaded tables and views, keyed by the name queries use for them."""
 
     def __init__(self):
         self.tables = {}
+        self.views = {}
+        self._resolving = set()
 
     def resolve(self, source):
+        if source in self.views:
+            if source in self._resolving:
+                raise SquealError("view %s references itself" % source)
+            self._resolving.add(source)
+            try:
+                result = execute(self.views[source], self.resolve)
+            finally:
+                self._resolving.discard(source)
+            from .csvload import CsvTable
+            return CsvTable(result.columns, result.rows, [str] * len(result.columns),
+                            "<view %s>" % source)
         if source in self.tables:
             return self.tables[source]
         path = source
@@ -38,9 +51,28 @@ class Session:
         return table
 
     def run(self, sql):
-        return self.run_select(parse(sql))
+        return self.run_statement(parse(sql))
+
+    def run_statement(self, stmt):
+        from . import astnodes as ast
+        if isinstance(stmt, ast.CreateView):
+            execute(stmt.select, self.resolve)  # fail now on a broken view
+            self.views[stmt.name] = stmt.select
+            self.tables.pop(stmt.name, None)
+            return "view %s created" % stmt.name
+        if isinstance(stmt, ast.DropView):
+            if stmt.name not in self.views:
+                if stmt.if_exists:
+                    return "view %s did not exist" % stmt.name
+                raise SquealError("no such view: %s" % stmt.name)
+            del self.views[stmt.name]
+            return "view %s dropped" % stmt.name
+        return self.run_select(stmt)
 
     def run_select(self, select):
+        from . import astnodes as ast
+        if not isinstance(select, ast.Select):
+            return self.run_statement(select)
         if select.explain:
             for ref in table_refs(select.source):
                 self.resolve(ref.name)  # fail early on a bad path

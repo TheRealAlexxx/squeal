@@ -50,6 +50,20 @@ class Parser:
     def parse(self):
         while self.cur.kind == SEMI:
             self.advance()
+        if self.at_kw("create"):
+            stmt = self.parse_create_view()
+            while self.cur.kind == SEMI:
+                self.advance()
+            if self.cur.kind != END:
+                self.fail("unexpected %r after the end of the statement" % self.cur.text)
+            return stmt
+        if self.at_kw("drop"):
+            stmt = self.parse_drop_view()
+            while self.cur.kind == SEMI:
+                self.advance()
+            if self.cur.kind != END:
+                self.fail("unexpected %r after the end of the statement" % self.cur.text)
+            return stmt
         explain = False
         analyze = False
         if self.at_kw("explain"):
@@ -75,15 +89,41 @@ class Parser:
                 self.advance()
             if self.cur.kind == END:
                 return statements
-            explain = False
-            if self.at_kw("explain"):
-                self.advance()
-                explain = True
-            stmt = self.parse_select()
-            stmt.explain = explain
-            statements.append(stmt)
+            if self.at_kw("create"):
+                statements.append(self.parse_create_view())
+            elif self.at_kw("drop"):
+                statements.append(self.parse_drop_view())
+            else:
+                explain = False
+                if self.at_kw("explain"):
+                    self.advance()
+                    explain = True
+                stmt = self.parse_select()
+                stmt.explain = explain
+                statements.append(stmt)
             if self.cur.kind not in (SEMI, END):
                 self.fail("expected ';' between statements, found %r" % self.cur.text)
+
+    def parse_create_view(self):
+        self.expect_kw("create")
+        self.expect_kw("view")
+        if self.cur.kind != IDENT:
+            self.fail("expected a view name")
+        name = self.advance().text
+        self.expect_kw("as")
+        return ast.CreateView(name, self.parse_select())
+
+    def parse_drop_view(self):
+        self.expect_kw("drop")
+        self.expect_kw("view")
+        if_exists = False
+        if self.at_kw("if"):
+            self.advance()
+            self.expect_kw("exists")
+            if_exists = True
+        if self.cur.kind != IDENT:
+            self.fail("expected a view name")
+        return ast.DropView(self.advance().text, if_exists)
 
     def parse_select(self):
         self.expect_kw("select")
