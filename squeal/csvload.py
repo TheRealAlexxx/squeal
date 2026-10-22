@@ -1,0 +1,53 @@
+"""Load a CSV file into rows, guessing a type for each column.
+
+A column becomes int when every value looks like an integer, float when
+every value is numeric, otherwise it stays text. Empty cells are NULL.
+The guess uses the whole file, not just the first row, so one stray
+"pending" in a sea of numbers demotes the column to text rather than
+crashing the query.
+"""
+
+import csv
+import re
+
+INT_RE = re.compile(r"^[+-]?\d+$")
+FLOAT_RE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$")
+
+
+def _infer(values):
+    """Pick int, float or str for one column of raw strings (None = empty)."""
+    present = [v for v in values if v is not None]
+    if present and all(INT_RE.match(v) for v in present):
+        return int
+    if present and all(FLOAT_RE.match(v) for v in present):
+        return float
+    return str
+
+
+class CsvTable:
+    def __init__(self, columns, rows, types, path):
+        self.columns = columns
+        self.rows = rows
+        self.types = types  # per column: int, float or str
+        self.path = path
+
+
+def load(path):
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        raw = list(csv.reader(fh))
+    if not raw:
+        return CsvTable([], [], [], path)
+    columns = [c.strip() or "column%d" % (i + 1) for i, c in enumerate(raw[0])]
+    width = len(columns)
+    body = []
+    for record in raw[1:]:
+        if not record or all(not cell.strip() for cell in record):
+            continue  # skip blank lines
+        record = record[:width] + [""] * (width - len(record))
+        body.append([cell.strip() or None for cell in record])
+    types = [_infer([row[i] for row in body]) for i in range(width)]
+    rows = []
+    for row in body:
+        rows.append(tuple(types[i](row[i]) if row[i] is not None else None
+                          for i in range(width)))
+    return CsvTable(columns, rows, types, path)
