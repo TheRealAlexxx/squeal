@@ -147,6 +147,22 @@ def eval_call(node, ctx):
         else:
             values = [eval_expr(node.args[0], RowContext(ctx.schema, row, ctx.resolve))
                       for row in ctx.rows()]
+        if node.distinct:
+            seen = set()
+            unique = []
+            for v in values:
+                marker = (type(v).__name__, v)
+                if marker not in seen:
+                    seen.add(marker)
+                    unique.append(v)
+            values = unique
+        if name == "group_concat":
+            separator = ","
+            if len(node.args) > 1:
+                separator = eval_expr(node.args[1], ctx)
+                if separator is None:
+                    separator = ""
+            return AGGREGATES[name](values, node.star, separator)
         return AGGREGATES[name](values, node.star)
     if name in SCALAR_FUNCTIONS:
         lo, hi, fn = SCALAR_FUNCTIONS[name]

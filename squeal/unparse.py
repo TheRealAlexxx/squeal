@@ -34,7 +34,9 @@ def to_sql(node):
     if isinstance(node, ast.FuncCall):
         if node.star:
             return "%s(*)" % node.name
-        return "%s(%s)" % (node.name, ", ".join(to_sql(a) for a in node.args))
+        prefix = "DISTINCT " if node.distinct else ""
+        return "%s(%s%s)" % (node.name, prefix,
+                             ", ".join(to_sql(a) for a in node.args))
     if isinstance(node, ast.Subquery):
         return "(subquery)"
     if isinstance(node, ast.Exists):

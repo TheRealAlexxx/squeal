@@ -65,3 +65,28 @@ class ScalarFunctionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AggregateExtrasTests(unittest.TestCase):
+    def test_count_distinct(self):
+        self.assertEqual(one("select count(distinct city) from people"), 3)
+
+    def test_sum_distinct(self):
+        self.assertEqual(one("select sum(distinct age) from people"), 182)
+
+    def test_group_concat(self):
+        self.assertEqual(one("select group_concat(name) from people where city = 'London'"),
+                         "Ada,Alan,Katherine")
+
+    def test_group_concat_separator(self):
+        self.assertEqual(one("select group_concat(distinct city, ' | ') from people"),
+                         "London | New York | Amsterdam")
+
+    def test_group_concat_skips_nulls(self):
+        self.assertEqual(one("select group_concat(age) from people where name = 'Katherine'"), None)
+
+    def test_group_concat_per_group(self):
+        r = execute(parse("select city, group_concat(name) from people group by city order by city"),
+                    load(FIXTURE))
+        self.assertEqual(r.rows[1], ("London", "Ada,Alan,Katherine"))
+

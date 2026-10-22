@@ -128,12 +128,13 @@ class Between(Node):
 
 
 class FuncCall(Node):
-    __slots__ = ("name", "args", "star")
+    __slots__ = ("name", "args", "star", "distinct")
 
-    def __init__(self, name, args, star=False):
+    def __init__(self, name, args, star=False, distinct=False):
         self.name = name.lower()
         self.args = args
         self.star = star
+        self.distinct = distinct
 
     def __repr__(self):
         return "FuncCall(%s, %r%s)" % (self.name, self.args, ", *" if self.star else "")

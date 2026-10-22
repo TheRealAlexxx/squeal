@@ -323,10 +323,16 @@ def _agg_max(values, star):
     return max(present, key=_sort_key) if present else None
 
 
+def _agg_group_concat(values, star, separator=","):
+    present = [str(v) for v in values if v is not None]
+    return separator.join(present) if present else None
+
+
 AGGREGATES = {
     "count": _agg_count,
     "sum": _agg_sum,
     "avg": _agg_avg,
     "min": _agg_min,
     "max": _agg_max,
+    "group_concat": _agg_group_concat,
 }

@@ -359,6 +359,10 @@ class Parser:
                     self.advance()
                     self.expect_op(")")
                     return ast.FuncCall(parts[0], [], star=True)
+                distinct = False
+                if self.at_kw("distinct"):
+                    self.advance()
+                    distinct = True
                 args = []
                 if not self.at_op(")"):
                     args.append(self.parse_expr())
@@ -366,7 +370,7 @@ class Parser:
                         self.advance()
                         args.append(self.parse_expr())
                 self.expect_op(")")
-                return ast.FuncCall(parts[0], args)
+                return ast.FuncCall(parts[0], args, distinct=distinct)
             return ast.Column(".".join(parts))
         self.fail("expected a value but found %r" % (tok.text or "end of input"), tok)
 
