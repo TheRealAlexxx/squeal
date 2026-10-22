@@ -12,7 +12,7 @@ KEYWORDS = {
     "offset", "as", "and", "or", "not", "null", "true", "false", "asc",
     "desc", "distinct", "case", "when", "then", "else", "end", "in", "is",
     "like", "between",
-    "explain",
+    "explain", "join", "inner", "left", "outer", "on", "cross",
 }
 
 TWO_CHAR_OPS = ("!=", "<>", "<=", ">=", "||")

@@ -150,6 +150,37 @@ class Case(Node):
         return "Case(%d whens)" % len(self.whens)
 
 
+class TableRef(Node):
+    __slots__ = ("name", "alias")
+
+    def __init__(self, name, alias=None):
+        self.name = name
+        self.alias = alias
+
+    def __repr__(self):
+        return "TableRef(%s%s)" % (self.name, " as " + self.alias if self.alias else "")
+
+
+class Join(Node):
+    __slots__ = ("left", "right", "kind", "on")
+
+    def __init__(self, left, right, kind, on):
+        self.left = left
+        self.right = right
+        self.kind = kind  # "inner" or "left"
+        self.on = on
+
+    def __repr__(self):
+        return "Join(%s, %s)" % (self.kind.upper(), to_join_repr(self))
+
+
+def to_join_repr(node):
+    if isinstance(node, TableRef):
+        return node.name
+    return "(%s %s JOIN %s)" % (to_join_repr(node.left), node.kind.upper(),
+                                to_join_repr(node.right))
+
+
 class Select(Node):
     __slots__ = ("distinct", "items", "source", "where", "group_by",
                  "having", "order_by", "limit", "offset", "explain")
@@ -159,7 +190,7 @@ class Select(Node):
         self.explain = explain
         self.distinct = distinct
         self.items = items          # [(expr, alias or None)]
-        self.source = source        # table name or 'file.csv' (string keeps its literal quotes off)
+        self.source = source        # TableRef, Join, or None
         self.where = where
         self.group_by = group_by    # [expr]
         self.having = having

@@ -125,3 +125,41 @@ if failures:
     print("%d FAILURE(S)" % failures)
     sys.exit(1)
 print("all parser tests passed")
+
+
+def test_table_alias():
+    q = parse("select o.id from orders as o")
+    t("alias", q.source.alias == "o")
+    q = parse("select o.id from orders o")
+    t("bare alias", q.source.alias == "o")
+    q = parse("select id from orders")
+    t("no alias", q.source.alias is None and q.source.name == "orders")
+
+def test_join_syntax():
+    q = parse("select 1 from a join b on a.x = b.x")
+    t("join", isinstance(q.source, ast.Join) and q.source.kind == "inner")
+    q = parse("select 1 from a inner join b on a.x = b.x")
+    t("inner", q.source.kind == "inner")
+    q = parse("select 1 from a left join b on a.x = b.x")
+    t("left", q.source.kind == "left")
+    q = parse("select 1 from a left outer join b on a.x = b.x")
+    t("left outer", q.source.kind == "left")
+
+def test_join_chains_left_assoc():
+    q = parse("select 1 from a join b on a.x = b.x join c on b.y = c.y")
+    t("chain", q.source.right.name == "c" and isinstance(q.source.left, ast.Join))
+
+def test_cross_join():
+    q = parse("select 1 from a cross join b")
+    t("cross", q.source.kind == "cross" and q.source.on is None)
+
+def test_join_requires_on():
+    try:
+        parse("select 1 from a join b")
+        t("should raise", False)
+    except SquealError:
+        pass
+
+test_table_alias(); test_join_syntax(); test_join_chains_left_assoc()
+test_cross_join(); test_join_requires_on()
+print("join parser tests passed")

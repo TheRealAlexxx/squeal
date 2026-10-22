@@ -154,19 +154,59 @@ class Parser:
         return (expr, alias)
 
     def parse_source(self):
+        left = self.parse_table_factor()
+        while True:
+            kind = None
+            if self.at_kw("inner"):
+                self.advance()
+                self.expect_kw("join")
+                kind = "inner"
+            elif self.at_kw("join"):
+                self.advance()
+                kind = "inner"
+            elif self.at_kw("left"):
+                self.advance()
+                if self.at_kw("outer"):
+                    self.advance()
+                self.expect_kw("join")
+                kind = "left"
+            elif self.at_kw("cross"):
+                self.advance()
+                self.expect_kw("join")
+                kind = "cross"
+            if kind is None:
+                return left
+            right = self.parse_table_factor()
+            on = None
+            if kind != "cross":
+                self.expect_kw("on")
+                on = self.parse_expr()
+            left = ast.Join(left, right, kind, on)
+
+    def parse_table_factor(self):
         tok = self.cur
         if tok.kind == STRING:  # from 'data.csv': a file path
             self.advance()
-            return tok.value
-        if tok.kind == IDENT:
+            name = tok.value
+        elif tok.kind == IDENT:
             parts = [self.advance().text]
             while self.at_op("."):
                 self.advance()
                 if self.cur.kind != IDENT:
                     self.fail("expected a name after the dot")
                 parts.append(self.advance().text)
-            return ".".join(parts)
-        self.fail("expected a table name or a 'file.csv' after FROM")
+            name = ".".join(parts)
+        else:
+            self.fail("expected a table name or a 'file.csv' after FROM")
+        alias = None
+        if self.at_kw("as"):
+            self.advance()
+            if self.cur.kind != IDENT:
+                self.fail("expected an alias after AS")
+            alias = self.advance().text
+        elif self.cur.kind == IDENT:
+            alias = self.advance().text
+        return ast.TableRef(name, alias)
 
     def parse_order_item(self):
         expr = self.parse_expr()
