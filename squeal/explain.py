@@ -10,6 +10,15 @@ from .executor import has_aggregate
 from .unparse import to_sql
 
 
+def source_sql(node):
+    if isinstance(node, ast.TableRef):
+        return node.name + (" as " + node.alias if node.alias else "")
+    if node.kind == "cross":
+        return "%s CROSS JOIN %s" % (source_sql(node.left), source_sql(node.right))
+    return "%s %s JOIN %s ON %s" % (source_sql(node.left), node.kind.upper(),
+                                    source_sql(node.right), to_sql(node.on))
+
+
 def plan(select):
     """Return the EXPLAIN tree as a list of (depth, text) lines."""
     lines = []
@@ -50,7 +59,7 @@ def plan(select):
         stage("Filter  " + to_sql(select.where))
         depth += 1
     if select.source:
-        stage("Scan  " + select.source)
+        stage("Scan  " + source_sql(select.source))
     else:
         stage("Compute  (no table)")
     lines.reverse()

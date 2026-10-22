@@ -135,10 +135,50 @@ class Result:
         self.rows = rows
 
 
-def execute(select, table):
-    schema = Schema([(None, c) for c in table.columns])
-    columns = table.columns
-    rows = list(table.rows)
+def _qualifier_for(name):
+    import os
+    base = os.path.basename(name)
+    if base.lower().endswith(".csv"):
+        base = base[:-4]
+    return base
+
+
+def scan_source(node, resolve):
+    """Turn a TableRef/Join tree into a (Schema, rows) pair."""
+    if isinstance(node, ast.TableRef):
+        table = resolve(node.name)
+        qual = node.alias or _qualifier_for(node.name)
+        return Schema([(qual, c) for c in table.columns]), list(table.rows)
+    if isinstance(node, ast.Join):
+        left_schema, left_rows = scan_source(node.left, resolve)
+        right_schema, right_rows = scan_source(node.right, resolve)
+        schema = left_schema.merge(right_schema)
+        rows = []
+        for lrow in left_rows:
+            matched = False
+            for rrow in right_rows:
+                combined = lrow + rrow
+                if node.on is None or truthy(
+                        eval_expr(node.on, RowContext(schema, combined))) is True:
+                    matched = True
+                    rows.append(combined)
+            if not matched and node.kind == "left":
+                rows.append(lrow + (None,) * len(right_schema))
+        return schema, rows
+    raise SquealError("cannot scan %r" % (node,))
+
+
+def execute(select, source):
+    if hasattr(source, "columns"):
+        # a bare table: single-source queries only
+        resolve = lambda _name, t=source: t
+    else:
+        resolve = source
+    if select.source is None:
+        schema, rows = Schema([]), [()]
+    else:
+        schema, rows = scan_source(select.source, resolve)
+    columns = schema.names
 
     if select.where is not None:
         rows = [r for r in rows
@@ -231,18 +271,19 @@ def _projection(select, columns):
     builders = []
     for expr, alias in select.items:
         if isinstance(expr, ast.Star):
-            for col in columns:
+            for slot, col in enumerate(columns):
                 names.append(col)
-                builders.append(_star_builder(col))
+                builders.append(_slot_builder(slot))
         else:
             names.append(alias or _default_name(expr))
             builders.append(_expr_builder(expr))
     return names, lambda ctx: [b(ctx) for b in builders]
 
 
-def _star_builder(col):
-    # GroupContext resolves a bare column through the group's first row.
-    return lambda ctx: ctx.get(col)
+def _slot_builder(slot):
+    # a star column reads its own slot directly: joined rows can carry
+    # two columns with the same bare name, and * wants both
+    return lambda ctx: ctx.rows()[0][slot] if isinstance(ctx, GroupContext)         else ctx.row[slot]
 
 
 def _expr_builder(expr):

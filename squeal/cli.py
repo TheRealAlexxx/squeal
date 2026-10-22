@@ -42,14 +42,25 @@ class Session:
 
     def run_select(self, select):
         if select.explain:
-            if select.source:
-                self.resolve(select.source)  # fail early on a bad path
+            for ref in table_refs(select.source):
+                self.resolve(ref.name)  # fail early on a bad path
             return render_plan(select)
         if select.source is None:
             # no FROM: one row computed from thin air
             from .csvload import CsvTable
             return execute(select, CsvTable([], [()], [], "<memory>"))
-        return execute(select, self.resolve(select.source))
+        return execute(select, self.resolve)
+
+
+def table_refs(node):
+    from . import astnodes as ast
+    if node is None:
+        return
+    if isinstance(node, ast.TableRef):
+        yield node
+    else:
+        yield from table_refs(node.left)
+        yield from table_refs(node.right)
 
 
 FORMATS = {"table": as_table, "csv": as_csv, "json": as_json}
