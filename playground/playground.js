@@ -74,7 +74,7 @@ function b64decode(b64) {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
 function readShareHash() {
@@ -452,9 +452,12 @@ async function copyShareLink() {
   if (sql) writeShareHash(sql);
   try {
     await navigator.clipboard.writeText(location.href);
-    setStatus("share link copied - it opens with this query mounted");
+    setStatus("share link copied - it contains your query text; " +
+              "uploaded files stay on this device, so queries over " +
+              "them will not run for the recipient");
   } catch (exc) {
-    setStatus("could not copy; the URL in the address bar is the share link");
+    setStatus("could not copy; the URL in the address bar is the share " +
+              "link, and it contains your query text");
   }
 }
 
