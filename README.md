@@ -98,6 +98,12 @@ elapsed: 0.2 ms
 - `ORDER BY` (multiple keys, `ASC`/`DESC`, select aliases and positions
   allowed, NULLs always last)
 - `LIMIT` and `OFFSET`
+- Compound selects: `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT`,
+  equal precedence evaluated left to right, like SQLite
+- `WITH` clauses (named statement-scoped subqueries) and
+  `WITH RECURSIVE`: working-table iteration, cycle-safe under
+  `UNION`, a 100,000-row guard, and early termination under an
+  unordered `LIMIT`
 - Arithmetic `+ - * / %`, string concat `||`, `CASE WHEN ... END`
 - 21 scalar functions, from `upper` to `sqrt`; see
   [docs/sql-reference.md](docs/sql-reference.md)

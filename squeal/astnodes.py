@@ -251,11 +251,11 @@ class Cte(Node):
 class Select(Node):
     __slots__ = ("distinct", "items", "source", "where", "group_by",
                  "having", "order_by", "limit", "offset", "explain",
-                 "analyze", "compounds", "ctes")
+                 "analyze", "compounds", "ctes", "recursive")
 
     def __init__(self, distinct, items, source, where, group_by, having,
                  order_by, limit, offset, explain=False, analyze=False,
-                 compounds=(), ctes=()):
+                 compounds=(), ctes=(), recursive=False):
         self.explain = explain
         self.analyze = analyze
         self.distinct = distinct
@@ -270,6 +270,7 @@ class Select(Node):
         self.compounds = compounds  # [(op, core Select)]; op in
                                     # union, union_all, intersect, except
         self.ctes = ctes            # [Cte], statement-scoped WITH clause
+        self.recursive = recursive  # WITH RECURSIVE: self-reference allowed
 
     def __repr__(self):
         return "Select(%d items from %s)" % (len(self.items), self.source)

@@ -75,7 +75,10 @@ def plan(select, resolve=None):
     for cte in select.ctes:
         # WITH definitions are separate pipelines, listed after the main
         # one, in declaration order
-        lines.append((0, "Cte  " + cte.name))
+        self_ref = any(isinstance(n, ast.TableRef) and n.name == cte.name
+                       for n in cte.select.walk())
+        label = "Cte  %s%s" % (cte.name, " (recursive)" if self_ref else "")
+        lines.append((0, label))
         lines.extend(plan(cte.select, resolve))
     return lines
 

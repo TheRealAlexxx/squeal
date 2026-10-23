@@ -3,8 +3,8 @@
 Semantics pinned here: a CTE is materialized on first use and shared
 for the rest of the statement; later CTEs may reference earlier ones;
 a CTE name shadows a table or view of the same name; a self-reference
-is an error (WITH RECURSIVE does not exist yet); an unused CTE is
-never evaluated.
+is an error under plain WITH (WITH RECURSIVE lives in its own tests);
+an unused CTE is never evaluated.
 """
 
 import os
@@ -84,11 +84,12 @@ class WithTests(unittest.TestCase):
         self.assertEqual(r.rows[-1], ("New York",))
         self.assertIn(("Lisbon",), r.rows)
 
-    def test_recursive_keyword_gets_an_honest_error(self):
-        with self.assertRaises(SquealError) as cm:
-            run("with recursive r as (select 1) select * from r")
-        self.assertIn("WITH RECURSIVE is not supported yet",
-                      str(cm.exception))
+    def test_recursive_keyword_parses(self):
+        # WITH RECURSIVE exists now; its semantics live in
+        # tests/test_recursive.py. A non-recursive CTE under the
+        # keyword just works.
+        r = run("with recursive r as (select 1) select * from r")
+        self.assertEqual(r.rows, [(1,)])
 
     def test_explain_lists_cte_pipeline(self):
         from squeal.cli import Session

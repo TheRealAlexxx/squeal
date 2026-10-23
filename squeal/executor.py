@@ -619,8 +619,17 @@ def _execute_compound(select, resolve, stats, exec_cache, outer):
         stats["compound_ops"] = op_counts
         stats["core_stats"] = core_stats
 
-    # ORDER BY over a compound names output columns or positions only;
-    # there is no source row left to evaluate anything else against
+    acc = _order_limit_offset(select, out_columns, acc,
+                              "a compound SELECT")
+    if stats is not None:
+        stats["rows"] = len(acc)
+    return Result(out_columns, acc)
+
+
+def _order_limit_offset(select, out_columns, rows, what):
+    """Statement-level ORDER BY / LIMIT / OFFSET over finished rows.
+    ORDER BY here names output columns or positions only; there is no
+    source row left to evaluate anything else against."""
     order_idx = []
     for expr, desc in select.order_by:
         if isinstance(expr, ast.Literal) and isinstance(expr.value, int) \
@@ -635,8 +644,8 @@ def _execute_compound(select, resolve, stats, exec_cache, outer):
         else:
             from .unparse import to_sql
             raise SquealError(
-                "ORDER BY over a compound SELECT must name an output "
-                "column or use a position, found %s" % to_sql(expr))
+                "ORDER BY over %s must name an output "
+                "column or use a position, found %s" % (what, to_sql(expr)))
     for i in range(len(order_idx) - 1, -1, -1):
         idx, desc = order_idx[i]
         def kf(row, idx=idx, desc=desc):
@@ -644,17 +653,124 @@ def _execute_compound(select, resolve, stats, exec_cache, outer):
             if v is None:
                 return (0 if desc else 1, (0, 0.0))
             return (1 if desc else 0, _sort_key(v))
-        acc.sort(key=kf, reverse=bool(desc))
-
+        rows.sort(key=kf, reverse=bool(desc))
     start = select.offset or 0
     end = None if select.limit is None else start + select.limit
-    acc = acc[start:end]
+    return rows[start:end]
+
+
+RECURSIVE_ROW_GUARD = 100_000
+
+
+def _refs_to(select, name):
+    return [n for n in select.walk()
+            if isinstance(n, ast.TableRef) and n.name == name]
+
+
+def _materialize_recursive(name, cte, wrapped, exec_cache, outer, stats,
+                           row_cap=None):
+    """Iterative evaluation of a self-referencing CTE, the standard
+    working-table algorithm:
+
+    1. run the anchor term; its rows are the first working table
+    2. run the recursive term with the CTE bound to the working table
+    3. brand-new rows become the next working table; repeat until an
+       iteration adds nothing
+
+    Termination is explicit. Under UNION (not ALL) dedupe against
+    everything accumulated stops cycles on loopy data. Under either
+    keyword the whole result is capped at RECURSIVE_ROW_GUARD rows, so a
+    runaway term (no dedupe, no filter) errors instead of spinning.
+
+    Row caps make termination explicit. A LIMIT on the CTE without ORDER
+    BY stops accumulation once that many rows exist, since any rows
+    satisfy an unordered limit. row_cap is the same hint pushed down by
+    execute() when the outer query is a plain limited scan of this CTE.
+    Iteration order matches SQLite's queue: anchor rows first, then each
+    level in the order its parents were produced, so a capped scan
+    returns the same prefix SQLite would.
+    """
+    sel = cte.select
+    shape_bad = (len(sel.compounds) != 1
+                 or sel.compounds[0][0] not in ("union", "union_all"))
+    if shape_bad:
+        raise SquealError(
+            "recursive WITH query %s must be one compound: "
+            "anchor UNION [ALL] recursive term" % name)
+    op, rec = sel.compounds[0]
+    if _refs_to(_core_of(sel), name):
+        raise SquealError("recursive WITH query %s: the anchor term "
+                          "cannot reference %s" % (name, name))
+    in_source = _refs_to(rec.source, name) if rec.source is not None else []
+    total = _refs_to(rec, name)
+    if len(total) != len(in_source):
+        raise SquealError("recursive WITH query %s: the recursive reference "
+                          "must be a direct scan, not a subquery" % name)
+    if len(in_source) != 1:
+        raise SquealError("recursive WITH query %s: the recursive term must "
+                          "scan %s exactly once" % (name, name))
+
+    anchor_result = execute(_core_of(sel), wrapped, None, exec_cache, outer)
+    columns = list(anchor_result.columns)
+    if cte.columns is not None:
+        if len(cte.columns) != len(columns):
+            raise SquealError("WITH %s names %d column(s) but its query "
+                              "returns %d" % (name, len(cte.columns),
+                                              len(columns)))
+        columns = list(cte.columns)
+
+    stop_at = None
+    if sel.limit is not None and not sel.order_by:
+        stop_at = (sel.offset or 0) + sel.limit
+    if row_cap is not None:
+        stop_at = row_cap if stop_at is None else min(stop_at, row_cap)
+
+    from .csvload import CsvTable
+    all_rows = []
+    seen = set()
+    work = []
+    for r in anchor_result.rows:
+        key = tuple(_hashable(v) for v in r)
+        if op == "union_all" or key not in seen:
+            seen.add(key)
+            all_rows.append(r)
+            work.append(r)
+    while work:
+        x_table = CsvTable(columns, work, [str] * len(columns),
+                           "<with %s>" % name)
+
+        def rec_resolve(nm, _t=x_table):
+            if nm == name:
+                return _t
+            return wrapped(nm)
+
+        rec_result = execute(rec, rec_resolve, None, exec_cache, outer)
+        new = []
+        for r in rec_result.rows:
+            key = tuple(_hashable(v) for v in r)
+            if op == "union_all" or key not in seen:
+                seen.add(key)
+                new.append(r)
+        all_rows.extend(new)
+        if len(all_rows) > RECURSIVE_ROW_GUARD:
+            raise SquealError(
+                "recursive WITH query %s exceeded the %d row guard; "
+                "add a LIMIT or a tighter recursive term"
+                % (name, RECURSIVE_ROW_GUARD))
+        if stop_at is not None and len(all_rows) >= stop_at:
+            all_rows = all_rows[:stop_at]
+            break
+        work = new
+    rows = _order_limit_offset(sel, columns, all_rows,
+                               "a recursive WITH query")
+    table = CsvTable(columns, rows, [str] * len(columns), "<with %s>" % name)
     if stats is not None:
-        stats["rows"] = len(acc)
-    return Result(out_columns, acc)
+        stats.setdefault("cte_rows", {})[name] = len(rows)
+    return table
 
 
-def _with_ctes(ctes, resolve, exec_cache, outer, stats):
+def _with_ctes(ctes, resolve, exec_cache, outer, stats, recursive=False,
+               row_caps=None):
     """Statement-scoped WITH: each named query is materialized on first
     use and shared for the rest of the statement, like the views and
     cached subqueries already here. Later CTEs may use earlier ones; a
@@ -676,9 +792,21 @@ def _with_ctes(ctes, resolve, exec_cache, outer, stats):
             return materialized[name]
         if name in in_progress:
             raise SquealError("WITH query %s references itself" % name)
+        cte = defs[name]
+        if _refs_to(cte.select, name):
+            if not recursive:
+                raise SquealError("WITH query %s references itself" % name)
+            in_progress.add(name)
+            try:
+                table = _materialize_recursive(
+                    name, cte, wrapped, exec_cache, outer, stats,
+                    None if row_caps is None else row_caps.get(name))
+            finally:
+                in_progress.discard(name)
+            materialized[name] = table
+            return table
         in_progress.add(name)
         try:
-            cte = defs[name]
             cstats = {} if stats is not None else None
             result = execute(cte.select, wrapped, cstats, exec_cache, outer)
             if stats is not None:
@@ -703,6 +831,20 @@ def _with_ctes(ctes, resolve, exec_cache, outer, stats):
     return wrapped
 
 
+def _plain_limited_scan(select):
+    """True when the statement is just SELECT <items> FROM one table
+    LIMIT n: no filtering, grouping, ordering, distinct or compounds, so
+    the first n source rows in scan order are the whole result."""
+    return (select.limit is not None
+            and not select.compounds
+            and not select.distinct
+            and select.where is None
+            and not select.group_by
+            and select.having is None
+            and not select.order_by
+            and isinstance(select.source, ast.TableRef))
+
+
 def execute(select, source, stats=None, exec_cache=None, outer=None):
     # stats, when given, collects per-stage row counts for EXPLAIN ANALYZE;
     # exec_cache shares subquery results across the whole statement;
@@ -715,7 +857,15 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
     else:
         resolve = source
     if select.ctes:
-        resolve = _with_ctes(select.ctes, resolve, exec_cache, outer, stats)
+        row_caps = None
+        if _plain_limited_scan(select):
+            caps = {}
+            for cte in select.ctes:
+                if _refs_to(cte.select, cte.name):
+                    caps[cte.name] = (select.offset or 0) + select.limit
+            row_caps = caps or None
+        resolve = _with_ctes(select.ctes, resolve, exec_cache, outer, stats,
+                             select.recursive, row_caps)
     if select.compounds:
         return _execute_compound(select, resolve, stats, exec_cache, outer)
     if select.source is None:

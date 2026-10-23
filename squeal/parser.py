@@ -132,10 +132,12 @@ class Parser:
         # one precedence, left to right, the SQLite rule this dialect
         # already follows elsewhere.
         ctes = []
+        recursive = False
         if self.at_kw("with"):
             self.advance()
             if self.at_kw("recursive"):
-                self.fail("WITH RECURSIVE is not supported yet")
+                self.advance()
+                recursive = True
             ctes.append(self.parse_cte())
             while self.at_op(","):
                 self.advance()
@@ -182,6 +184,7 @@ class Parser:
         first.offset = offset
         first.compounds = compounds
         first.ctes = ctes
+        first.recursive = recursive
         return first
 
     def parse_cte(self):

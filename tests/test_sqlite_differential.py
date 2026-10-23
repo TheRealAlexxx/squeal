@@ -19,7 +19,7 @@ from squeal.executor import execute
 from squeal.parser import parse
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
-TABLES = ["people", "customers", "purchases", "readings"]
+TABLES = ["people", "customers", "purchases", "readings", "edges"]
 
 # (sql, ordered): ordered=True compares the row sequence exactly,
 # ordered=False compares rows as a multiset.
@@ -152,6 +152,32 @@ STRICT_QUERIES = [
 
 # Queries needing a SQLite built with math functions (3.35+ or a distro
 # that enabled them). Skipped when the local SQLite lacks them.
+RECURSIVE_QUERIES = [
+    ("with recursive x(n) as (select 1 union all "
+     "select n + 1 from x where n < 5) select * from x order by n", True),
+    ("with recursive fib(a, b) as (select 0, 1 union all "
+     "select b, a + b from fib where a < 100) "
+     "select a from fib order by a", True),
+    # transitive closure over edges.csv: UNION dedupe stops the a->b->c->a
+    # cycle, and a reaches itself through it
+    ("with recursive reach(dst) as ("
+     "select dst from edges where src = 'a' union "
+     "select e.dst from edges e join reach r on e.src = r.dst) "
+     "select dst from reach order by dst", True),
+    # UNION ALL with an explicit depth bound
+    ("with recursive reach(dst, steps) as ("
+     "select dst, 1 from edges where src = 'a' union all "
+     "select e.dst, r.steps + 1 from edges e "
+     "join reach r on e.src = r.dst where r.steps < 4) "
+     "select steps, count(*) from reach group by steps order by steps", True),
+    # a plain outer LIMIT pushes down; the prefix matches SQLite's queue
+    ("with recursive fib(a, b) as (select 0, 1 union all "
+     "select b, a + b from fib) select a from fib limit 6", True),
+    ("with recursive x(s) as (select 'a' union all "
+     "select s || 'a' from x where length(s) < 4) "
+     "select * from x order by s", True),
+]
+
 MATH_QUERIES = [
     ("select floor(1.7), ceil(1.2), ceiling(1.2), sqrt(16.0), power(2,10), pow(3,2)", False),
     ("select floor(temp), ceil(temp) from readings where temp is not null "
@@ -171,6 +197,13 @@ OUTER_QUERIES = [
 # diverging; if one starts matching, squeal grew SQLite-compatible there
 # and the list must be updated.
 KNOWN_DIVERGENCES = {
+    "with recursive x(n) as (select 1 union all "
+    "select n + 1 from x where n < 9 order by n desc limit 3) "
+    "select * from x":
+        "SQLite errors on a named ORDER BY over a recursive CTE and "
+        "silently ignores a positional one; squeal applies ORDER BY and "
+        "LIMIT to the accumulated rows, which is the semantics its docs "
+        "promise",
     "select 7 / 2, 9 / 4":
         "SQLite truncates integer division; squeal always does true division",
     "select 1 / 0":
@@ -274,7 +307,7 @@ class DifferentialTests(unittest.TestCase):
         return expected, got, rows_match(expected, got, ordered)
 
     def test_strict_queries_match_sqlite(self):
-        queries = list(STRICT_QUERIES)
+        queries = list(STRICT_QUERIES) + RECURSIVE_QUERIES
         if self.has_math:
             queries += MATH_QUERIES
         if self.has_right_full:

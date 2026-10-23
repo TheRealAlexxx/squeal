@@ -52,10 +52,41 @@ select * from high
 
 Each name materializes on first use and is shared for the rest of the
 statement, including across sides of a compound and inside subqueries.
-Later CTEs may use earlier ones; a CTE that reaches itself is an
-error, like a self-referencing view. A CTE name shadows a table or
-view of the same name. An unused CTE is never evaluated. WITH
-RECURSIVE does not exist yet and fails at parse time.
+Later CTEs may use earlier ones; a CTE name shadows a table or
+view of the same name. An unused CTE is never evaluated. Under plain
+WITH, a CTE that reaches itself is an error, like a self-referencing
+view; WITH RECURSIVE allows exactly that.
+
+### WITH RECURSIVE
+
+```
+with recursive reach(dst) as (
+  select dst from edges where src = 'a'
+  union
+  select e.dst from edges e join reach r on e.src = r.dst
+)
+select dst from reach
+```
+
+A recursive CTE is one compound: an anchor term, UNION or UNION ALL,
+and a recursive term that scans the CTE exactly once as a plain source
+(not inside a subquery, and the anchor never references it). Evaluation
+is the working-table algorithm: the anchor's rows are the first working
+table, the recursive term runs against it, and brand-new rows become
+the next working table until a round adds nothing. Under UNION (not
+ALL) dedupe checks every row accumulated so far, which is what stops
+cycles on loopy data, as in the closure query above.
+
+Termination is explicit, because UNION ALL on cyclic data never stops
+on its own. Every recursive query is capped at 100,000 accumulated
+rows and errors past that ("exceeded the 100000 row guard; add a
+LIMIT or a tighter recursive term"). An unordered LIMIT stops
+accumulation early, either written on the CTE itself or pushed down
+from a plain outer scan like `select * from x limit 5`. Rows come out
+in SQLite's queue order - anchor first, then each level in the order
+its parents were produced - so a capped scan returns the same prefix
+SQLite would. ORDER BY and LIMIT on the CTE itself apply to the
+accumulated rows after iteration.
 
 ## Sources
 
@@ -126,6 +157,10 @@ row set and cannot mix with GROUP BY.
 - A positional ORDER BY or GROUP BY reference must point at a real
   expression; `select * from t order by 1` fails because `*` is not
   one.
+- SQLite errors on a named ORDER BY over a recursive CTE and silently
+  ignores a positional one. squeal applies ORDER BY and LIMIT on a
+  recursive CTE to the accumulated rows, so the same query can return
+  different (and, squeal would argue, the promised) rows.
 - There is no CAST. Types come from the CSV, so `cast(age as text)`
   fails at parse time with a pointer at the `as`. If you need a number
   as text, export and convert, or use || with an empty string:
