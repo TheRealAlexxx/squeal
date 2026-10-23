@@ -109,13 +109,13 @@ class JoinStrategyTests(unittest.TestCase):
                                  scan_schema(q.source.right, resolver))
         self.assertEqual(strategy, "nested loop")
 
-    def test_anded_condition_falls_back(self):
+    def test_anded_equijoin_hashes_with_residual(self):
         from squeal.executor import scan_schema, join_strategy
         q = parse("select 1 from customers c join purchases p "
                   "on c.id = p.customer_id and p.amount > 10")
         strategy = join_strategy(q.source, scan_schema(q.source.left, resolver),
                                  scan_schema(q.source.right, resolver))
-        self.assertEqual(strategy, "nested loop")
+        self.assertEqual(strategy, "hash")
 
     def test_hash_join_null_keys_never_match(self):
         import tempfile
@@ -164,4 +164,40 @@ class OuterJoinTests(unittest.TestCase):
         r = run("select count(*) from customers c right outer join purchases p "
                 "on c.id = p.customer_id")
         self.assertEqual(r.rows[0][0], 5)
+
+
+
+class MultiKeyJoinTests(unittest.TestCase):
+    def test_residual_filter_applies(self):
+        # same rows as the nested-loop version: the amount condition must hold
+        r = run("select c.name, p.item from customers c join purchases p "
+                "on c.id = p.customer_id and p.amount > 20 order by p.id")
+        self.assertEqual(r.rows, [("Ada", "keyboard"), ("Ada", "mouse"),
+                                  ("Alan", "monitor")])
+
+    def test_residual_no_match_left_pads(self):
+        r = run("select count(*) from customers c left join purchases p "
+                "on c.id = p.customer_id and p.amount > 1000")
+        self.assertEqual(r.rows[0][0], 4)  # every customer kept, mostly padded
+
+    def test_multi_column_key(self):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "prices.csv")
+        with open(path, "w") as fh:
+            fh.write("item,city,price\nkeyboard,London,79\nkeyboard,New York,85\n")
+        r = execute(parse("select p.item, x.price from purchases p join '%s' x "
+                          "on p.item = x.item and x.city = 'London'" % path),
+                    resolver)
+        # one keyboard purchase, matched to the London price only (not the 85 one)
+        self.assertEqual(r.rows, [("keyboard", 79)])
+
+    def test_multi_key_null_component_never_matches(self):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "g2.csv")
+        with open(path, "w") as fh:
+            fh.write("customer_id,amount,item\n1,,ghost\n")
+        r = execute(parse("select count(*) from purchases p join '%s' g "
+                          "on p.customer_id = g.customer_id and p.amount = g.amount"
+                          % path), resolver)
+        self.assertEqual(r.rows[0][0], 0)
 

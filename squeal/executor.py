@@ -377,14 +377,42 @@ def _refs_within(expr, schema):
 
 
 def equijoin_keys(on, left_schema, right_schema):
-    """Split `a = b` into (left-side expr, right-side expr), or None."""
-    if not isinstance(on, ast.Binary) or on.op != "=":
+    """Split join conditions into hash keys plus a residual filter.
+
+    `a.x = b.x AND a.y = b.y AND a.z > 10` becomes two key pairs and the
+    `a.z > 10` residual. Returns (left_exprs, right_exprs, residual) or
+    None when no conjunct is a clean equijoin.
+    """
+    conjuncts = []
+    def flatten(expr):
+        if isinstance(expr, ast.Binary) and expr.op == "and":
+            flatten(expr.left)
+            flatten(expr.right)
+        else:
+            conjuncts.append(expr)
+    flatten(on)
+
+    left_exprs, right_exprs, residual_parts = [], [], []
+    for conjunct in conjuncts:
+        pair = None
+        if isinstance(conjunct, ast.Binary) and conjunct.op == "=":
+            if _refs_within(conjunct.left, left_schema) and \
+                    _refs_within(conjunct.right, right_schema):
+                pair = (conjunct.left, conjunct.right)
+            elif _refs_within(conjunct.left, right_schema) and \
+                    _refs_within(conjunct.right, left_schema):
+                pair = (conjunct.right, conjunct.left)
+        if pair is not None:
+            left_exprs.append(pair[0])
+            right_exprs.append(pair[1])
+        else:
+            residual_parts.append(conjunct)
+    if not left_exprs:
         return None
-    if _refs_within(on.left, left_schema) and _refs_within(on.right, right_schema):
-        return on.left, on.right
-    if _refs_within(on.left, right_schema) and _refs_within(on.right, left_schema):
-        return on.right, on.left
-    return None
+    residual = None
+    for part in residual_parts:
+        residual = part if residual is None else ast.Binary("and", residual, part)
+    return left_exprs, right_exprs, residual
 
 
 def _hashable(value):
@@ -440,25 +468,33 @@ def _hash_join(node, keys, schema, left_schema, left_rows,
                right_schema, right_rows):
     """Build a hash of the right side on the join key, probe with the left.
 
-    NULL keys never match, matching SQL's refusal to call NULL = NULL.
+    Multi-column keys hash as tuples. NULL keys never match, matching
+    SQL's refusal to call NULL = NULL. Any residual condition is checked
+    on the combined row after the hash lookup.
     """
-    lexpr, rexpr = keys
+    left_exprs, right_exprs, residual = keys
     buckets = {}
     for r_i, rrow in enumerate(right_rows):
-        key = _hashable(eval_expr(rexpr, RowContext(right_schema, rrow)))
-        if key is None:
+        ctx = RowContext(right_schema, rrow)
+        key = tuple(_hashable(eval_expr(e, ctx)) for e in right_exprs)
+        if None in key:
             continue
         buckets.setdefault(key, []).append(r_i)
     matched_right = set()
     rows = []
     for lrow in left_rows:
-        key = _hashable(eval_expr(lexpr, RowContext(left_schema, lrow)))
-        matches = buckets.get(key, []) if key is not None else []
+        lctx = RowContext(left_schema, lrow)
+        key = tuple(_hashable(eval_expr(e, lctx)) for e in left_exprs)
+        matches = buckets.get(key, []) if None not in key else []
         matched = False
         for r_i in matches:
+            combined = lrow + right_rows[r_i]
+            if residual is not None and truthy(
+                    eval_expr(residual, RowContext(schema, combined))) is not True:
+                continue
             matched = True
             matched_right.add(r_i)
-            rows.append(lrow + right_rows[r_i])
+            rows.append(combined)
         if not matched and node.kind in ("left", "full"):
             rows.append(lrow + (None,) * len(right_schema))
     if node.kind in ("right", "full"):
