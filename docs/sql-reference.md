@@ -31,12 +31,14 @@ A select item is `expr [AS alias]`, `*`, or a window call.
 - `'path/to/file.csv'` - a CSV file, optionally with an alias
 - `name` - resolved to `name.csv` in the working directory
 - `source [INNER] JOIN source ON expr`
-- `source LEFT [OUTER] JOIN source ON expr`
+- `source LEFT|RIGHT|FULL [OUTER] JOIN source ON expr`
 - `source CROSS JOIN source`
 - Every source may carry an alias: `FROM orders o` or `FROM orders AS o`
 
-Equijoins (`ON a.x = b.y`) run as hash joins; anything else falls back
-to a nested loop. EXPLAIN names the strategy.
+Equijoins (`ON a.x = b.y`) run as hash joins, including multi-key
+equijoins (`ON a.x = b.x AND a.y = b.y`), which hash on the tuple;
+leftover non-equality conjuncts become residual filters. Anything
+else falls back to a nested loop. EXPLAIN names the strategy.
 
 ## Expressions
 
@@ -83,7 +85,10 @@ row set and cannot mix with GROUP BY.
 - Numbers always compare less than text, so mixed columns never crash
   a comparison.
 - ORDER BY puts NULLs last in both directions.
-- Subqueries are uncorrelated: the inner query cannot see outer
-  columns. It is executed once and cached for the statement.
+- Subqueries may be correlated (the inner query can reference outer
+  columns). Uncorrelated ones are executed once and cached for the
+  statement; correlated ones run per outer row, with memoized
+  correlation checks and per-statement probe sets to keep the common
+  cases cheap.
 - A bare column in a grouped query reads the group's first row, the
   SQLite convention.
