@@ -1,0 +1,44 @@
+# subqueries: expected results verified against SQLite at generation time
+
+query T nosort
+select name from customers where id in (select customer_id from purchases) order by name
+----
+Ada
+Alan
+Grace
+
+query T nosort
+select name from customers where id not in (select customer_id from purchases) order by name
+----
+Edsger
+
+query T nosort
+select name from people where age > (select avg(age) from people) order by name
+----
+Alan
+Barbara
+
+query T nosort
+select name from customers where exists (select 1 from purchases where purchases.customer_id = customers.id) order by name
+----
+Ada
+Alan
+Grace
+
+query T nosort
+select name from customers where not exists (select 1 from purchases where purchases.customer_id = customers.id) order by name
+----
+Edsger
+
+query TI nosort
+select name, (select count(*) from purchases where purchases.customer_id = customers.id) from customers order by name
+----
+Ada 2
+Alan 1
+Edsger 0
+Grace 1
+
+query T rowsort
+select item from purchases where amount = (select max(amount) from purchases)
+----
+laptop

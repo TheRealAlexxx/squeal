@@ -1,0 +1,43 @@
+# setops: expected results verified against SQLite at generation time
+
+query T nosort
+select city from people union select city from people order by city
+----
+Amsterdam
+London
+New York
+
+query T nosort
+select name from customers union select name from people order by name
+----
+Ada
+Alan
+Barbara
+Edsger
+Grace
+Katherine
+
+query I nosort
+select id from customers union all select customer_id from purchases order by id
+----
+1
+1
+1
+2
+2
+3
+3
+4
+9
+
+query I nosort
+select id from customers intersect select customer_id from purchases order by id
+----
+1
+2
+3
+
+query I nosort
+select id from customers except select customer_id from purchases order by id
+----
+4

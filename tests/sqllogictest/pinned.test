@@ -1,0 +1,72 @@
+# pinned: squeal dialect behavior that deliberately differs from SQLite.
+# Expected values here come from squeal itself (verified by hand against
+# docs/sql-reference.md at pinning time), NOT from the SQLite oracle that
+# generates the other .test files. Each record says why it differs.
+
+# typeof names squeal's types: int/float/text/null; SQLite says real.
+query TTTT nosort
+select typeof(1), typeof(1.5), typeof('a'), typeof(null)
+----
+integer float text null
+
+# round() is Python's banker's rounding; SQLite rounds half away from zero.
+query III nosort
+select round(2.5), round(3.5), round(-2.5)
+----
+2 4 -2
+
+# round(x) with no digits returns an integer; SQLite returns a float.
+query RI nosort
+select round(91.54, 1), round(91.54)
+----
+91.500 92
+
+# / always yields a float; SQLite does integer division on int / int.
+query RR nosort
+select 7 / 2, 8 / 2
+----
+3.500 4.000
+
+# ORDER BY puts NULLs last in both directions (documented dialect rule);
+# SQLite sorts NULLs first ascending, so Katherine rows first there.
+query TII nosort
+select name, age, row_number() over (order by age) from people order by age
+----
+Grace 29 1
+Edsger 34 2
+Ada 36 3
+Alan 41 4
+Barbara 42 5
+Katherine NULL 6
+
+# Documented limits (docs/sql-reference.md): these must stay errors.
+# There is no CAST; types come from the CSV.
+statement error found 'as'
+select cast('42' as integer)
+
+# CASE is the searched form only; no case operand.
+statement error CASE needs at least one WHEN
+select case age when 34 then 'a' end from people
+
+# hex() is not in the function set.
+statement error unknown function: hex
+select hex(255)
+
+# Window functions are row_number/rank/dense_rank plus aggregates.
+statement error cannot be used as a window function
+select name, lag(name) over (order by name) from people
+
+statement error cannot be used as a window function
+select name, first_value(name) over (order by name) from people
+
+# No explicit frame clause; ORDER BY fixes the running frame.
+statement error found 'rows'
+select name, sum(age) over (order by age rows unbounded preceding) from people
+
+# FROM takes table, view or CTE names; no derived tables.
+statement error after FROM
+select max(amount) from (select amount from purchases)
+
+# Select aliases are not visible in HAVING; repeat the aggregate.
+statement error no such column: n
+select city, count(*) as n from people group by city having n >= 2

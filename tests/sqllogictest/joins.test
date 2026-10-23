@@ -1,0 +1,47 @@
+# joins: expected results verified against SQLite at generation time
+
+query TT nosort
+select customers.name, purchases.item from customers join purchases on purchases.customer_id = customers.id order by customers.name, purchases.item
+----
+Ada keyboard
+Ada mouse
+Alan monitor
+Grace cable
+
+query TT nosort
+select customers.name, purchases.item from customers left join purchases on purchases.customer_id = customers.id order by customers.name, purchases.item
+----
+Ada keyboard
+Ada mouse
+Alan monitor
+Edsger NULL
+Grace cable
+
+query TT nosort
+select a.name, b.name from customers a cross join customers b where a.id < b.id order by a.name, b.name
+----
+Ada Alan
+Ada Edsger
+Ada Grace
+Alan Edsger
+Alan Grace
+Grace Edsger
+
+query II rowsort
+select a.id, b.id from readings a join readings b on b.sensor = a.sensor and b.day = a.day and b.temp = a.temp where a.id <> b.id
+----
+14 15
+15 14
+
+query II rowsort
+select a.id, b.id from purchases a join purchases b on a.customer_id = b.customer_id and a.amount > b.amount
+----
+101 102
+
+query TI nosort
+select c.name, count(p.item) from customers c left join purchases p on p.customer_id = c.id group by c.name order by c.name
+----
+Ada 2
+Alan 1
+Edsger 0
+Grace 1

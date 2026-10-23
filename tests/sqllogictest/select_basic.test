@@ -1,0 +1,89 @@
+# select_basic: expected results verified against SQLite at generation time
+
+query TI nosort
+select name, age from people order by name
+----
+Ada 36
+Alan 41
+Barbara 42
+Edsger 34
+Grace 29
+Katherine NULL
+
+query ITT nosort
+select * from customers order by id
+----
+1 Ada London
+2 Alan London
+3 Grace New York
+4 Edsger Amsterdam
+
+query T rowsort
+select distinct city from people
+----
+London
+New York
+Amsterdam
+
+query T nosort
+select name from people where age >= 36 order by age desc, name
+----
+Barbara
+Alan
+Ada
+
+query T rowsort
+select name from people limit 3
+----
+Ada
+Alan
+Grace
+
+query T rowsort
+select name from people limit 2 offset 1
+----
+Alan
+Grace
+
+query TI rowsort
+select city, count(*) from people group by city
+----
+Amsterdam 1
+London 3
+New York 2
+
+query TT nosort
+select upper(name), lower(city) from people order by name
+----
+ADA london
+ALAN london
+BARBARA new york
+EDSGER amsterdam
+GRACE new york
+KATHERINE london
+
+query TIII nosort
+select name, age + 1, age * 2, age % 10 from people order by name
+----
+Ada 37 72 6
+Alan 42 82 1
+Barbara 43 84 2
+Edsger 35 68 4
+Grace 30 58 9
+Katherine NULL NULL NULL
+
+query TI nosort
+select 'x' as constant_col, 42 from customers order by id limit 2
+----
+x 42
+x 42
+
+query TT nosort
+select name as n, city as c from people order by n
+----
+Ada London
+Alan London
+Barbara New York
+Edsger Amsterdam
+Grace New York
+Katherine London

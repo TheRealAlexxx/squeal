@@ -1,0 +1,46 @@
+# expressions: expected results verified against SQLite at generation time
+
+query IRIII rowsort
+select abs(-4), abs(4.5), sign(-2), sign(0), sign(7)
+----
+4 4.500 -1 0 1
+
+query TTI rowsort
+select coalesce(null, null, 'x'), nullif(1,1), nullif(1,2)
+----
+x NULL 1
+
+query TT rowsort
+select ifnull(null,'d'), iif(1>0,'y','n')
+----
+d y
+
+query ITT rowsort
+select instr('hello','ll'), substr('hello',2,3), replace('aaa','a','b')
+----
+3 ell bbb
+
+query TTTI rowsort
+select trim('  hi  '), ltrim('  hi'), rtrim('hi  '), length('hello')
+----
+hi hi hi 5
+
+query T nosort
+select name || ' <' || city || '>' as label from people order by name
+----
+Ada <London>
+Alan <London>
+Barbara <New York>
+Edsger <Amsterdam>
+Grace <New York>
+Katherine <London>
+
+query T nosort
+select case when age >= 40 then 'senior' when age >= 30 then 'mid' else 'junior' end from people order by name
+----
+mid
+senior
+senior
+mid
+junior
+junior

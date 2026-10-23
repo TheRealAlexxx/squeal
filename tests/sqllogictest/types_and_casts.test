@@ -1,0 +1,39 @@
+# types_and_casts: expected results verified against SQLite at generation time
+
+query IIII rowsort
+select 1 = 1, 1 < 2, 'a' > 'b', 2 <> 2
+----
+1 1 0 0
+
+query T nosort
+select name from people where age between 30 and 40 order by name
+----
+Ada
+Edsger
+
+query T nosort
+select name from people where city in ('London','Amsterdam') order by name
+----
+Ada
+Alan
+Edsger
+Katherine
+
+query T nosort
+select name from people where city not in ('London') order by name
+----
+Barbara
+Edsger
+Grace
+
+query T nosort
+select name from people where name like 'A%' order by name
+----
+Ada
+Alan
+
+query T nosort
+select name from people where name like '_d%' order by name
+----
+Ada
+Edsger

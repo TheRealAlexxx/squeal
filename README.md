@@ -174,8 +174,15 @@ PYTHONPATH=. python3 -m unittest discover -s tests
 The suite covers the lexer, parser, value semantics, executor, joins,
 subqueries, window functions, the playground bridge, the columnar
 engine's row-for-row parity with the row engine, and the CLI end to
-end: 210 tests. CI
+end: 291 tests. CI
 runs it on Python 3.9 through 3.12.
+
+The published correctness claim is a sqllogictest subset: 80 records
+in [tests/sqllogictest](tests/sqllogictest), where the feature files
+were verified against SQLite at generation time and
+[pinned.test](tests/sqllogictest/pinned.test) documents each deliberate
+dialect difference. The count in this paragraph is asserted by the
+test suite, so it cannot drift from the corpus.
 
 ## Performance
 

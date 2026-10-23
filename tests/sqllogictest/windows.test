@@ -1,0 +1,41 @@
+# windows: expected results verified against SQLite at generation time
+
+query TI nosort
+select name, rank() over (order by age desc) from people order by age desc, name
+----
+Barbara 1
+Alan 2
+Ada 3
+Edsger 4
+Grace 5
+Katherine 6
+
+query TTI nosort
+select name, city, rank() over (partition by city order by age desc) from people order by city, age desc
+----
+Edsger Amsterdam 1
+Alan London 1
+Ada London 2
+Katherine London 3
+Barbara New York 1
+Grace New York 2
+
+query TR nosort
+select name, avg(age) over (partition by city) from people order by city, name
+----
+Edsger 34.000
+Ada 38.500
+Alan 38.500
+Katherine 38.500
+Barbara 35.500
+Grace 35.500
+
+query TI nosort
+select name, dense_rank() over (order by city) from people order by city, name
+----
+Edsger 1
+Ada 2
+Alan 2
+Katherine 2
+Barbara 3
+Grace 3

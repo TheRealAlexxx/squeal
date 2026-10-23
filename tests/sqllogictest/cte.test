@@ -1,0 +1,43 @@
+# cte: expected results verified against SQLite at generation time
+
+query T nosort
+with big as (select * from purchases where amount > 50) select item from big order by item
+----
+keyboard
+laptop
+monitor
+
+query I rowsort
+with a as (select 1 as x), b as (select x + 1 as y from a) select y from b
+----
+2
+
+query T nosort
+with city_counts as (select city, count(*) as n from people group by city) select city from city_counts where n > 1 order by city
+----
+London
+New York
+
+query I rowsort
+with recursive cnt(x) as (select 1 union all select x + 1 from cnt where x < 5) select x from cnt
+----
+1
+2
+3
+4
+5
+
+query I rowsort
+with recursive fib(a, b) as (select 0, 1 union all select b, a + b from fib where a < 50) select a from fib
+----
+0
+1
+1
+2
+3
+5
+8
+13
+21
+34
+55

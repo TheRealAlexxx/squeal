@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- sqllogictest-subset corpus in tests/sqllogictest: 80 records,
+  feature files verified against the SQLite oracle at generation time,
+  pinned.test holding hand-verified dialect differences; the README
+  count is asserted by the test suite
+
 - Compound selects: UNION, UNION ALL, INTERSECT, EXCEPT, with SQLite's
   equal-precedence left-to-right rule
 - WITH clauses: named statement-scoped subqueries, materialized on

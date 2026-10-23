@@ -1,0 +1,45 @@
+# nulls: expected results verified against SQLite at generation time
+
+query IIRRR rowsort
+select count(score), count(*), min(score), max(score), sum(score) from people
+----
+5 6 77.250 95.000 435.250
+
+query T nosort
+select name from people where score is null order by name
+----
+Alan
+
+query T nosort
+select name from people where score is not null order by name
+----
+Ada
+Barbara
+Edsger
+Grace
+Katherine
+
+query T nosort
+select nullif(score, score) from people where score is not null order by name limit 2
+----
+NULL
+NULL
+
+query R rowsort
+select avg(score) from people
+----
+87.050
+
+query I rowsort
+select 1 where null is null
+----
+1
+
+query T nosort
+select name from people where score > 80 or score is null order by name
+----
+Ada
+Alan
+Barbara
+Grace
+Katherine
