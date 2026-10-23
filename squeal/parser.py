@@ -482,6 +482,8 @@ def parse(sql):
         if not e.source:
             e.source = sql
         raise
+    except RecursionError:
+        raise SquealError("the query is nested too deeply", source=sql)
 
 
 def parse_many(sql):

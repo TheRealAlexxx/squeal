@@ -43,6 +43,15 @@ class Schema:
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
+            qualifiers = {q for i, (q, n) in enumerate(self.pairs)
+                          if n == name and i in matches}
+            if len(qualifiers) == 1:
+                # every match lives in the same table: the header itself
+                # repeats the name, so qualifying cannot help
+                only = qualifiers.pop()
+                raise SquealError(
+                    "the header of %s repeats the column name %r"
+                    % (only or "the table", name))
             qualified = ["%s.%s" % (q, n) for i, (q, n) in enumerate(self.pairs)
                          if n == name and q is not None]
             hint = " (did you mean %s?)" % " or ".join(qualified) if qualified else ""
