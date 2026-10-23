@@ -87,6 +87,36 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class FromLessSubqueryTests(unittest.TestCase):
+    """A FROM-less query's items may still hold subqueries that read
+    real tables. The CLI used to hand execute() a constant resolver
+    (a single-row CsvTable shim), so every table lookup inside such a
+    subquery hit the empty table: 'no such column'."""
+
+    def test_scalar_subquery_without_outer_from(self):
+        r = cli("select (select max(age) from '%s')" % FIXTURE)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("42", r.stdout)
+        self.assertIn("(1 row)", r.stdout)
+
+    def test_exists_without_outer_from(self):
+        r = cli("select 1 where exists (select 1 from '%s' "
+                "where age > 40)" % FIXTURE)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("(1 row)", r.stdout)
+
+    def test_not_exists_without_outer_from(self):
+        r = cli("select 1 where not exists (select 1 from '%s' "
+                "where age > 400)" % FIXTURE)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("(1 row)", r.stdout)
+
+    def test_plain_from_less_still_works(self):
+        r = cli("select 1 + 1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("2", r.stdout)
+
+
 class ExplainAnalyzeTests(unittest.TestCase):
     def test_explain_analyze(self):
         r = cli("explain analyze select name from '%s' where age > 30" % FIXTURE)

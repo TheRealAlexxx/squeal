@@ -102,12 +102,15 @@ class Session:
                 return body
             return prefix + render_plan(select, self.resolve)
         if select.source is None and not select.compounds:
-            # no FROM: one row computed from thin air
-            from .csvload import CsvTable
+            # no FROM: one row computed from thin air. execute() makes
+            # that row itself for a None source; it still needs the real
+            # resolver so subqueries in the items can read actual tables
+            # (the old single-row CsvTable shim made resolve() a constant
+            # and every subquery table lookup hit the empty table)
             if self.engine == "columnar":
                 print("columnar: query outside the subset, "
                       "using the row engine", file=sys.stderr)
-            return execute(select, CsvTable([], [()], [], "<memory>"))
+            return execute(select, self.resolve)
         if self.engine == "columnar":
             note = self._columnar_note(select)
             if note is not None:
