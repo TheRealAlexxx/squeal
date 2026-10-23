@@ -581,8 +581,9 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
     select_order_by = [(positional(e), d) for e, d in select.order_by]
 
     if select.where is not None:
-        rows = [r for r in rows
-                if truthy(eval_expr(select.where, RowContext(schema, r, resolve, exec_cache, outer))) is True]
+        pred = _compile(select.where, schema,
+                        lambda node: (lambda r: eval_expr(node, RowContext(schema, r, resolve, exec_cache, outer))))
+        rows = [r for r in rows if truthy(pred(r)) is True]
     if stats is not None:
         stats["filter"] = len(rows)
 
@@ -644,9 +645,16 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
 
     pairs = list(zip(projected, order_keys))
     if select_order_by:
-        from functools import cmp_to_key
-        descs = [d for _, d in select_order_by]
-        pairs.sort(key=cmp_to_key(lambda a, b: _cmp_rows(a[1], b[1], descs)))
+        # decorate-sort: one stable pass per key, last key first. NULLs last
+        # in both directions (reverse=True flips flags, so desc uses 0 for NULL).
+        for i in range(len(select_order_by) - 1, -1, -1):
+            desc = select_order_by[i][1]
+            def kf(pair, i=i, desc=desc):
+                v = pair[1][i]
+                if v is None:
+                    return (0 if desc else 1, (0, 0.0))
+                return (1 if desc else 0, _sort_key(v))
+            pairs.sort(key=kf, reverse=bool(desc))
     projected = [p for p, _ in pairs]
 
     if select.distinct:
@@ -715,3 +723,35 @@ def _default_name(expr):
     if isinstance(expr, ast.Column):
         return expr.name
     return to_sql(expr)
+
+
+def _compile(node, schema, fallback):
+    """Compile an expression to fn(row). Unsupported nodes use fallback(node)."""
+    if isinstance(node, ast.Literal):
+        v = node.value
+        return lambda r: v
+    if isinstance(node, ast.Column):
+        try:
+            slot = schema.resolve(node.name)
+        except SquealError:
+            return fallback(node)   # outer-correlated or an error: keep old path
+        return lambda r: r[slot]
+    if isinstance(node, ast.Unary) and node.op == "not":
+        f = _compile(node.expr, schema, fallback)
+        return lambda r: sql_not(f(r))
+    if isinstance(node, ast.IsNull):
+        f = _compile(node.expr, schema, fallback)
+        neg_ = node.negated
+        return (lambda r: f(r) is not None) if neg_ else (lambda r: f(r) is None)
+    if isinstance(node, ast.Binary):
+        l = _compile(node.left, schema, fallback)
+        rr = _compile(node.right, schema, fallback)
+        op = node.op
+        if op == "and":
+            return lambda r: sql_and(l(r), rr(r))
+        if op == "or":
+            return lambda r: sql_or(l(r), rr(r))
+        if op in ("=", "!=", "<", "<=", ">", ">="):
+            return lambda r: compare(op, l(r), rr(r))
+        return lambda r: arith(op, l(r), rr(r))
+    return fallback(node)

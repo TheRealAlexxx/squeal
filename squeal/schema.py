@@ -15,6 +15,7 @@ class Schema:
         # pairs: [(qualifier or None, bare name)]
         self.pairs = list(pairs)
         self.names = [name for _, name in self.pairs]
+        self._slots = {}  # memo of successful lookups; errors are never cached
 
     def __len__(self):
         return len(self.pairs)
@@ -24,6 +25,14 @@ class Schema:
 
     def resolve(self, name):
         """Return the slot for a possibly qualified column name."""
+        hit = self._slots.get(name)
+        if hit is not None:
+            return hit
+        slot = self._resolve(name)
+        self._slots[name] = slot
+        return slot
+
+    def _resolve(self, name):
         if "." in name:
             matches = [i for i, (q, n) in enumerate(self.pairs)
                        if q is not None and name == q + "." + n]
