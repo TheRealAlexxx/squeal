@@ -9,6 +9,10 @@ squeal exists to answer a question: what is the smallest honest SQL
 engine you can still learn something from? Every stage is a single
 small module you can read in one sitting.
 
+**Try it in your browser: [squeal playground](https://therealalexxx.github.io/squeal/playground/)**
+- the whole engine compiled to WebAssembly, querying real CSVs,
+no install.
+
 ## Install
 
 ```
