@@ -86,7 +86,11 @@ from a plain outer scan like `select * from x limit 5`. Rows come out
 in SQLite's queue order - anchor first, then each level in the order
 its parents were produced - so a capped scan returns the same prefix
 SQLite would. ORDER BY and LIMIT on the CTE itself apply to the
-accumulated rows after iteration.
+accumulated rows after iteration. The recursive term computes new
+rows from one working table at a time, so it cannot use aggregate
+functions, window functions, GROUP BY, or HAVING - those have no
+honest meaning across levels and error (SQLite rejects them too);
+DISTINCT stays allowed.
 
 ## Sources
 
