@@ -38,8 +38,38 @@ def scan_stages(node, resolve=None):
     return stages
 
 
+COMPOUND_LABELS = {"union": "Union", "union_all": "Union All",
+                   "intersect": "Intersect", "except": "Except"}
+
+
+def _compound_plan(select, resolve=None):
+    """The fixed pipeline, linearized: each core's own stages in order,
+    separated by the compound operator that combines it, with the
+    statement-level Sort/Limit last. Rendered with the usual chain
+    indentation, so it reads top to bottom as data flow."""
+    from .executor import _core_of
+    lines = plan(_core_of(select), resolve)
+    for op, core in select.compounds:
+        lines.append((0, COMPOUND_LABELS[op]))
+        lines.extend(plan(core, resolve))
+    if select.order_by:
+        keys = ", ".join(to_sql(e) + (" DESC" if d else "")
+                         for e, d in select.order_by)
+        lines.append((0, "Sort  keys: " + keys))
+    if select.limit is not None or select.offset is not None:
+        bits = []
+        if select.limit is not None:
+            bits.append("limit %d" % select.limit)
+        if select.offset:
+            bits.append("offset %d" % select.offset)
+        lines.append((0, "Limit " + " ".join(bits)))
+    return lines
+
+
 def plan(select, resolve=None):
     """Return the EXPLAIN tree as a list of (depth, text) lines."""
+    if select.compounds:
+        return _compound_plan(select, resolve)
     lines = []
     depth = 0
 
@@ -95,6 +125,11 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
     out = []
     join_seen = False
     table_counts = iter(stats.get("table_rows", []))
+    compound_counts = iter(stats.get("compound_ops", []))
+    # compound plans: each core measured separately; the op line hands
+    # over to the next core's counts
+    core_stats = iter(stats.get("core_stats", [stats]))
+    cur_core = next(core_stats)
     for i, (_, text) in enumerate(lines):
         note = ""
         if text.startswith("Scan  "):
@@ -103,13 +138,19 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
                 note = "%d rows" % count
         elif text.startswith(("Hash Join", "Nested Loop Join")) and not join_seen:
             join_seen = True
-            note = "%d joined rows" % stats.get("scan", 0)
+            note = "%d joined rows" % cur_core.get("scan", 0)
         elif text.startswith("Filter"):
-            note = "%d in, %d out" % (stats.get("scan", 0), stats.get("filter", 0))
+            note = "%d in, %d out" % (cur_core.get("scan", 0),
+                                      cur_core.get("filter", 0))
         elif text.startswith("Aggregate"):
-            note = "%d groups" % stats.get("contexts", 0)
+            note = "%d groups" % cur_core.get("contexts", 0)
         elif text.startswith("Project"):
-            note = "%d rows" % stats.get("projected", 0)
+            note = "%d rows" % cur_core.get("projected", 0)
+        elif text.startswith(("Union", "Intersect", "Except")):
+            count = next(compound_counts, None)
+            if count is not None:
+                note = "%d rows" % count
+            cur_core = next(core_stats, cur_core)
         elif text.startswith("Limit"):
             note = "%d rows" % stats.get("rows", 0)
         prefix = text if i == 0 else "  " * (i - 1) + "-> " + text

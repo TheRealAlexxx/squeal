@@ -75,8 +75,11 @@ class Session:
         if not isinstance(select, ast.Select):
             return self.run_statement(select)
         if select.explain:
-            for ref in table_refs(select.source):
-                self.resolve(ref.name)  # fail early on a bad path
+            sources = [select.source] + [core.source
+                                         for _op, core in select.compounds]
+            for src in sources:
+                for ref in table_refs(src):
+                    self.resolve(ref.name)  # fail early on a bad path
             prefix = ""
             if self.engine == "columnar" and not select.analyze:
                 prefix = "engine: " + self._planned_engine(select) + "\n"
@@ -84,7 +87,8 @@ class Session:
                 import time
                 from .explain import render_analyzed
                 stats = {"table_rows": [len(self.resolve(ref.name).rows)
-                                        for ref in table_refs(select.source)]}
+                                        for src in sources
+                                        for ref in table_refs(src)]}
                 start = time.perf_counter()
                 execute(select, self.resolve, stats)
                 elapsed = (time.perf_counter() - start) * 1000
@@ -94,7 +98,7 @@ class Session:
                             "the row pipeline)\n" + body)
                 return body
             return prefix + render_plan(select, self.resolve)
-        if select.source is None:
+        if select.source is None and not select.compounds:
             # no FROM: one row computed from thin air
             from .csvload import CsvTable
             if self.engine == "columnar":
@@ -117,6 +121,8 @@ class Session:
     def _columnar_note(self, select):
         """Why the columnar engine will not take this query, or None."""
         from . import astnodes as ast
+        if select.compounds:
+            return "columnar: compound selects are outside the subset, using the row engine"
         if not isinstance(select.source, ast.TableRef):
             return "columnar: joins are outside the subset, using the row engine"
         if select.source.name in self.views:

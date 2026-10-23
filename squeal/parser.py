@@ -126,6 +126,72 @@ class Parser:
         return ast.DropView(self.advance().text, if_exists)
 
     def parse_select(self):
+        # SQL's real grammar: select-core (compound-op select-core)*, with
+        # ORDER BY / LIMIT / OFFSET once at the very end for the whole
+        # statement. All compound ops share one precedence, left to right,
+        # the SQLite rule this dialect already follows elsewhere.
+        first = self.parse_select_core()
+        compounds = []
+        while True:
+            op = self.parse_compound_op()
+            if op is None:
+                break
+            compounds.append((op, self.parse_select_core()))
+        order_by = []
+        if self.at_kw("order"):
+            self.advance()
+            self.expect_kw("by")
+            order_by.append(self.parse_order_item())
+            while self.at_op(","):
+                self.advance()
+                order_by.append(self.parse_order_item())
+        limit = None
+        if self.at_kw("limit"):
+            self.advance()
+            tok = self.cur
+            if tok.kind != NUMBER or not isinstance(tok.value, int):
+                self.fail("LIMIT needs a whole number", tok)
+            self.advance()
+            limit = tok.value
+        offset = None
+        if self.at_kw("offset"):
+            self.advance()
+            tok = self.cur
+            if tok.kind != NUMBER or not isinstance(tok.value, int):
+                self.fail("OFFSET needs a whole number", tok)
+            self.advance()
+            offset = tok.value
+        if compounds or order_by or limit is not None or offset is not None:
+            # a compound op after ORDER BY/LIMIT is almost always a misplaced
+            # clause, so name the real rule instead of failing later
+            if self.at_kw("union") or self.at_kw("intersect") or self.at_kw("except"):
+                self.fail("ORDER BY and LIMIT belong at the very end of a "
+                          "compound SELECT")
+        first.order_by = order_by
+        first.limit = limit
+        first.offset = offset
+        first.compounds = compounds
+        return first
+
+    def parse_compound_op(self):
+        if self.at_kw("union"):
+            self.advance()
+            if self.at_kw("all"):
+                self.advance()
+                return "union_all"
+            if self.at_kw("distinct"):
+                self.advance()
+                return "union"
+            return "union"
+        if self.at_kw("intersect"):
+            self.advance()
+            return "intersect"
+        if self.at_kw("except"):
+            self.advance()
+            return "except"
+        return None
+
+    def parse_select_core(self):
         self.expect_kw("select")
         distinct = False
         if self.at_kw("distinct"):
@@ -155,32 +221,10 @@ class Parser:
         if self.at_kw("having"):
             self.advance()
             having = self.parse_expr()
-        order_by = []
-        if self.at_kw("order"):
-            self.advance()
-            self.expect_kw("by")
-            order_by.append(self.parse_order_item())
-            while self.at_op(","):
-                self.advance()
-                order_by.append(self.parse_order_item())
-        limit = None
-        if self.at_kw("limit"):
-            self.advance()
-            tok = self.cur
-            if tok.kind != NUMBER or not isinstance(tok.value, int):
-                self.fail("LIMIT needs a whole number", tok)
-            self.advance()
-            limit = tok.value
-        offset = None
-        if self.at_kw("offset"):
-            self.advance()
-            tok = self.cur
-            if tok.kind != NUMBER or not isinstance(tok.value, int):
-                self.fail("OFFSET needs a whole number", tok)
-            self.advance()
-            offset = tok.value
+        # ORDER BY / LIMIT / OFFSET are parsed by parse_select, after any
+        # compound operators, because they bind to the whole statement
         return ast.Select(distinct, items, source, where, group_by, having,
-                          order_by, limit, offset)
+                          [], None, None)
 
     def parse_select_item(self):
         if self.at_op("*"):

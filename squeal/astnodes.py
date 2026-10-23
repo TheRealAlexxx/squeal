@@ -238,10 +238,12 @@ class DropView(Node):
 
 class Select(Node):
     __slots__ = ("distinct", "items", "source", "where", "group_by",
-                 "having", "order_by", "limit", "offset", "explain", "analyze")
+                 "having", "order_by", "limit", "offset", "explain",
+                 "analyze", "compounds")
 
     def __init__(self, distinct, items, source, where, group_by, having,
-                 order_by, limit, offset, explain=False, analyze=False):
+                 order_by, limit, offset, explain=False, analyze=False,
+                 compounds=()):
         self.explain = explain
         self.analyze = analyze
         self.distinct = distinct
@@ -253,6 +255,8 @@ class Select(Node):
         self.order_by = order_by    # [(expr, descending)]
         self.limit = limit
         self.offset = offset
+        self.compounds = compounds  # [(op, core Select)]; op in
+                                    # union, union_all, intersect, except
 
     def __repr__(self):
         return "Select(%d items from %s)" % (len(self.items), self.source)

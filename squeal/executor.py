@@ -548,6 +548,102 @@ def _hash_join(node, keys, schema, left_schema, left_rows,
     return rows
 
 
+def _core_of(select):
+    """The outer Select as its own first core: compound operators, and the
+    statement-level ORDER BY / LIMIT / OFFSET, belong to the compound as a
+    whole, not to the first term."""
+    return ast.Select(select.distinct, select.items, select.source,
+                      select.where, select.group_by, select.having,
+                      [], None, None)
+
+
+def _dedupe(rows):
+    seen = set()
+    out = []
+    for row in rows:
+        key = tuple(_hashable(v) for v in row)
+        if key not in seen:
+            seen.add(key)
+            out.append(row)
+    return out
+
+
+def _execute_compound(select, resolve, stats, exec_cache, outer):
+    """UNION / UNION ALL / INTERSECT / EXCEPT, folded left to right with
+    equal precedence (the SQLite rule). Non-ALL operators deduplicate,
+    and dedupe treats NULL = NULL, the same convention SELECT DISTINCT
+    already uses here. Column names come from the first core.
+    """
+    cores = [_core_of(select)] + [core for _op, core in select.compounds]
+    results = []
+    core_stats = []
+    for i, core in enumerate(cores):
+        cstats = {} if stats is not None else None
+        result = execute(core, resolve, cstats, exec_cache, outer)
+        if stats is not None:
+            core_stats.append(cstats)
+        if i > 0 and len(result.columns) != len(results[0].columns):
+            op = select.compounds[i - 1][0].replace("_", " ").upper()
+            raise SquealError(
+                "%s needs the same number of columns on both sides: "
+                "%d vs %d" % (op, len(results[0].columns), len(result.columns)))
+        results.append(result)
+    out_columns = results[0].columns
+    acc = list(results[0].rows)
+    op_counts = []
+    for (op, _core), result in zip(select.compounds, results[1:]):
+        if op == "union_all":
+            acc = acc + list(result.rows)
+        elif op == "union":
+            acc = _dedupe(acc + list(result.rows))
+        elif op == "intersect":
+            right = {tuple(_hashable(v) for v in r) for r in result.rows}
+            acc = _dedupe([r for r in acc
+                           if tuple(_hashable(v) for v in r) in right])
+        else:  # except
+            right = {tuple(_hashable(v) for v in r) for r in result.rows}
+            acc = _dedupe([r for r in acc
+                           if tuple(_hashable(v) for v in r) not in right])
+        op_counts.append(len(acc))
+    if stats is not None:
+        stats["compound_ops"] = op_counts
+        stats["core_stats"] = core_stats
+
+    # ORDER BY over a compound names output columns or positions only;
+    # there is no source row left to evaluate anything else against
+    order_idx = []
+    for expr, desc in select.order_by:
+        if isinstance(expr, ast.Literal) and isinstance(expr.value, int) \
+                and not isinstance(expr.value, bool):
+            if not 1 <= expr.value <= len(out_columns):
+                raise SquealError("positional reference %d is out of range: "
+                                  "the query selects %d item(s)"
+                                  % (expr.value, len(out_columns)))
+            order_idx.append((expr.value - 1, desc))
+        elif isinstance(expr, ast.Column) and expr.name in out_columns:
+            order_idx.append((out_columns.index(expr.name), desc))
+        else:
+            from .unparse import to_sql
+            raise SquealError(
+                "ORDER BY over a compound SELECT must name an output "
+                "column or use a position, found %s" % to_sql(expr))
+    for i in range(len(order_idx) - 1, -1, -1):
+        idx, desc = order_idx[i]
+        def kf(row, idx=idx, desc=desc):
+            v = row[idx]
+            if v is None:
+                return (0 if desc else 1, (0, 0.0))
+            return (1 if desc else 0, _sort_key(v))
+        acc.sort(key=kf, reverse=bool(desc))
+
+    start = select.offset or 0
+    end = None if select.limit is None else start + select.limit
+    acc = acc[start:end]
+    if stats is not None:
+        stats["rows"] = len(acc)
+    return Result(out_columns, acc)
+
+
 def execute(select, source, stats=None, exec_cache=None, outer=None):
     # stats, when given, collects per-stage row counts for EXPLAIN ANALYZE;
     # exec_cache shares subquery results across the whole statement;
@@ -559,6 +655,8 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
         resolve = lambda _name, t=source: t
     else:
         resolve = source
+    if select.compounds:
+        return _execute_compound(select, resolve, stats, exec_cache, outer)
     if select.source is None:
         schema, rows = Schema([]), [()]
     else:

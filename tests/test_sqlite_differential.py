@@ -111,6 +111,26 @@ STRICT_QUERIES = [
      "group by sensor order by sensor", True),
     ("select day, count(*), avg(temp) from readings "
      "group by day order by day", True),
+    # compound selects: UNION / UNION ALL / INTERSECT / EXCEPT
+    ("select city from people union select 'Lisbon' order by 1", True),
+    ("select city from people union all select 'Lisbon' order by 1", True),
+    ("select city from people intersect "
+     "select city from people where city = 'London'", False),
+    ("select city from people except "
+     "select city from people where city in ('London','Amsterdam')", False),
+    ("select name from people where age > 30 union "
+     "select name from people where score is not null order by name", True),
+    ("select city, count(*) as n from people group by city "
+     "union select 'everywhere', count(*) from people order by 1", True),
+    ("select city from people union select 'Lisbon' "
+     "order by 1 limit 3 offset 1", True),
+    ("select name from customers where id in "
+     "(select customer_id from purchases union select 999) order by name", True),
+    ("select 1 as x union select 2 intersect select 2", False),
+    ("select 1.0 as x union select 1", False),
+    ("select age from people except select 36", False),
+    # NULL ages dedupe to one; DESC puts NULLs last on both engines
+    ("select age from people union select 99 order by 1 desc", True),
 ]
 
 # Queries needing a SQLite built with math functions (3.35+ or a distro
