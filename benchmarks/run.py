@@ -61,6 +61,9 @@ QUERIES = [
     ("order by + limit", "select id from {orders} order by unit_price desc limit 20"),
     ("subquery in", "select count(*) from {orders} where customer_id in "
                     "(select id from {customers} where region = 'eu-north')"),
+    ("recursive: 10k chain", "with recursive x(n) as (select 1 union all "
+                             "select n + 1 from x where n < 10000) "
+                             "select count(*) from x"),
 ]
 
 

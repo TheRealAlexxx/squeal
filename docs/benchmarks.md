@@ -16,12 +16,13 @@ A 1 GB RAM container, CPython 3.10. Your machine will differ.
 
 | query | squeal | SQLite | slower by |
 | --- | --- | --- | --- |
-| filter + count | 9 ms | 0.6 ms | 17x |
-| group by + having | 21 ms | 3.0 ms | 7x |
-| hash join + group | 39 ms | 5.1 ms | 8x |
-| window: row_number | 116 ms | 13.9 ms | 8x |
-| order by + limit | 33 ms | 0.6 ms | 51x |
-| subquery in | 21 ms | 1.2 ms | 18x |
+| filter + count | 10 ms | 0.7 ms | 14x |
+| group by + having | 19 ms | 2.6 ms | 7x |
+| hash join + group | 34 ms | 4.5 ms | 8x |
+| window: row_number | 109 ms | 13.6 ms | 8x |
+| order by + limit | 29 ms | 0.6 ms | 49x |
+| subquery in | 19 ms | 1.1 ms | 18x |
+| recursive: 10k chain | 255 ms | 2.1 ms | 121x |
 
 The SQLite column comes from `benchmarks/run.py --compare-sqlite`,
 which loads the same generated CSVs into an in-memory SQLite with the
