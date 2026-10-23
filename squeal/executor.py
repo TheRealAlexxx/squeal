@@ -769,7 +769,9 @@ def _materialize_recursive(name, cte, wrapped, exec_cache, outer, stats,
         if len(all_rows) > RECURSIVE_ROW_GUARD:
             raise SquealError(
                 "recursive WITH query %s exceeded the %d row guard; "
-                "add a LIMIT or a tighter recursive term"
+                "a LIMIT bounds it only on the CTE itself or on a plain "
+                "outer scan - with WHERE, DISTINCT or aggregates the "
+                "recursive term itself must be tighter"
                 % (name, RECURSIVE_ROW_GUARD))
         if stop_at is not None and len(all_rows) >= stop_at:
             all_rows = all_rows[:stop_at]
@@ -798,6 +800,7 @@ def _with_ctes(ctes, resolve, exec_cache, outer, stats, recursive=False,
     defs = {c.name: c for c in ctes}
     materialized = {}
     in_progress = set()
+    capped = set()
 
     def wrapped(name):
         if name not in defs:
@@ -810,13 +813,21 @@ def _with_ctes(ctes, resolve, exec_cache, outer, stats, recursive=False,
         if _refs_to(cte.select, name):
             if not recursive:
                 raise SquealError("WITH query %s references itself" % name)
+            cap = None if row_caps is None else row_caps.get(name)
+            if name in capped:
+                # A capped materialization is a prefix for the LIMIT it
+                # served, not the CTE; a second reference needs the full
+                # iteration. Unreachable while pushdown eligibility
+                # holds, so this is belt and braces, not the fix.
+                cap = None
             in_progress.add(name)
             try:
                 table = _materialize_recursive(
-                    name, cte, wrapped, exec_cache, outer, stats,
-                    None if row_caps is None else row_caps.get(name))
+                    name, cte, wrapped, exec_cache, outer, stats, cap)
             finally:
                 in_progress.discard(name)
+            if cap is not None:
+                capped.add(name)
             materialized[name] = table
             return table
         in_progress.add(name)
@@ -847,8 +858,12 @@ def _with_ctes(ctes, resolve, exec_cache, outer, stats, recursive=False,
 
 def _plain_limited_scan(select):
     """True when the statement is just SELECT <items> FROM one table
-    LIMIT n: no filtering, grouping, ordering, distinct or compounds, so
-    the first n source rows in scan order are the whole result."""
+    LIMIT n: no filtering, grouping, ordering, distinct or compounds,
+    and no item that reads past its own row. Aggregates, window calls
+    and subqueries all see more than the LIMIT prefix (an aggregate
+    reads every row, a window ranks the whole set, a subquery can
+    re-scan the source), so any of them in an item makes a pushed-down
+    LIMIT wrong."""
     return (select.limit is not None
             and not select.compounds
             and not select.distinct
@@ -856,7 +871,12 @@ def _plain_limited_scan(select):
             and not select.group_by
             and select.having is None
             and not select.order_by
-            and isinstance(select.source, ast.TableRef))
+            and isinstance(select.source, ast.TableRef)
+            and not any(has_aggregate(e)
+                        or any(isinstance(n, (ast.WindowCall, ast.Subquery,
+                                              ast.Exists))
+                               for n in e.walk())
+                        for e, _ in select.items))
 
 
 def execute(select, source, stats=None, exec_cache=None, outer=None):
@@ -873,11 +893,15 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
     if select.ctes:
         row_caps = None
         if _plain_limited_scan(select):
-            caps = {}
+            # Only the CTE the outer query scans directly may be capped:
+            # capping any other recursive CTE would truncate it for the
+            # statements that consume it (a later plain CTE, a view-like
+            # chain) before the LIMIT's own prefix is taken.
             for cte in select.ctes:
-                if _refs_to(cte.select, cte.name):
-                    caps[cte.name] = (select.offset or 0) + select.limit
-            row_caps = caps or None
+                if (cte.name == select.source.name
+                        and _refs_to(cte.select, cte.name)):
+                    row_caps = {cte.name: (select.offset or 0)
+                               + select.limit}
         resolve = _with_ctes(select.ctes, resolve, exec_cache, outer, stats,
                              select.recursive, row_caps)
     if select.compounds:

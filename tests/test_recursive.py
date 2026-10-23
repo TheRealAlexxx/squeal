@@ -142,6 +142,40 @@ class RecursiveTests(unittest.TestCase):
                   "select * from x")
         self.assertEqual(out.rows, [(1,), (2,), (3,)])
 
+    def test_outer_limit_does_not_push_past_an_aggregate(self):
+        # independent QA repro: a pushed-down LIMIT truncated the CTE
+        # the aggregate was supposed to read
+        out = run("with recursive n(x) as (select 1 union all "
+                  "select x + 1 from n where x < 10) "
+                  "select count(*) from n limit 1")
+        self.assertEqual(out.rows, [(10,)])
+        out = run("with recursive n(x) as (select 1 union all "
+                  "select x + 1 from n where x < 10) "
+                  "select sum(x) from n limit 1")
+        self.assertEqual(out.rows, [(55,)])
+
+    def test_outer_limit_does_not_push_past_a_window(self):
+        out = run("with recursive n(x) as (select 1 union all "
+                  "select x + 1 from n where x < 10) "
+                  "select count(*) over () from n limit 2")
+        self.assertEqual(out.rows, [(10,), (10,)])
+
+    def test_outer_limit_does_not_push_past_a_subquery(self):
+        # the subquery re-reads the CTE through the shared cache; a
+        # capped cache entry answered it with the prefix
+        out = run("with recursive n(x) as (select 1 union all "
+                  "select x + 1 from n where x < 10) "
+                  "select x, (select count(*) from n) from n limit 2")
+        self.assertEqual(out.rows, [(1, 10), (2, 10)])
+
+    def test_outer_limit_caps_only_the_scanned_cte(self):
+        # y consumes x; capping x for y's outer LIMIT would corrupt y
+        out = run("with recursive x(n) as (select 1 union all "
+                  "select n + 1 from x where n < 5), "
+                  "y as (select count(*) as c from x) "
+                  "select * from y limit 1")
+        self.assertEqual(out.rows, [(5,)])
+
     def test_outer_limit_pushes_down(self):
         out = run("with recursive x(n) as (select 1 "
                   "union all select n + 1 from x) "

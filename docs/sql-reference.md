@@ -79,8 +79,10 @@ cycles on loopy data, as in the closure query above.
 
 Termination is explicit, because UNION ALL on cyclic data never stops
 on its own. Every recursive query is capped at 100,000 accumulated
-rows and errors past that ("exceeded the 100000 row guard; add a
-LIMIT or a tighter recursive term"). An unordered LIMIT stops
+rows and errors past that ("exceeded the 100000 row guard; a LIMIT
+bounds it only on the CTE itself or on a plain outer scan - with
+WHERE, DISTINCT or aggregates the recursive term itself must be
+tighter"). An unordered LIMIT stops
 accumulation early, either written on the CTE itself or pushed down
 from a plain outer scan like `select * from x limit 5`. Rows come out
 in SQLite's queue order - anchor first, then each level in the order
