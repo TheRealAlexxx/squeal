@@ -233,6 +233,8 @@ function tableNameFor(fileName) {
 }
 
 async function mountFiles(fileList) {
+  $("#error").hidden = true;
+  $("#message").hidden = true;
   for (const file of fileList) {
     if (!/\.csv$/i.test(file.name)) { setStatus("skipped " + file.name + ": not a .csv"); continue; }
     setStatus("loading " + file.name + "…");

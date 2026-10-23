@@ -3,7 +3,7 @@
   --card: #161b22;
   --border: #2d333b;
   --text: #e6edf3;
-  --muted: #8b949e;
+  --muted: #a5b1bd;
   --accent: #4ade80;
   --accent-dim: #1f6f43;
   --error: #f87171;
@@ -25,7 +25,7 @@ body {
   display: flex; align-items: center; justify-content: center;
   transition: opacity .3s;
 }
-#boot.done { opacity: 0; pointer-events: none; }
+#boot.done { opacity: 0; visibility: hidden; transition: opacity .3s, visibility 0s .35s; pointer-events: none; }
 .boot-card { text-align: center; width: min(320px, 80vw); }
 #boot-status { color: var(--muted); font-size: 13px; margin: 10px 0 14px; }
 .boot-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
@@ -37,7 +37,6 @@ body {
   font-size: 26px;
   letter-spacing: -0.5px;
 }
-.wordmark::after { content: " 🐷"; }
 
 header { max-width: 1080px; margin: 0 auto; padding: 28px 20px 8px; }
 .tagline { color: var(--muted); max-width: 640px; margin: 6px 0 0; }
