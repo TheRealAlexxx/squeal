@@ -120,10 +120,15 @@ async function mountBytes(name, buffer) {
   return bridgeCall("bridge.mount_csv_bytes(" + pyString(name) + ", " + pyString(btoa(binary)) + ")");
 }
 
+function showError(text) {
+  $("#error").textContent = text;
+  $("#error").hidden = false;
+  $("#error").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 function showMountOutcome(name, outcome) {
   if (!outcome.ok) {
-    $("#error").textContent = "error: " + outcome.error;
-    $("#error").hidden = false;
+    showError("error: " + outcome.error);
     setStatus("could not load " + name);
     return false;
   }
@@ -216,8 +221,7 @@ async function runQuery() {
   }
   $("#run").disabled = false;
   if (!outcome.ok) {
-    $("#error").textContent = outcome.rendered || ("error: " + outcome.error);
-    $("#error").hidden = false;
+    showError(outcome.rendered || ("error: " + outcome.error));
     $("#results").innerHTML = "";
     setStatus("query failed");
     return;
