@@ -205,10 +205,13 @@ the stages above:
 4. `executor.py`, starting at `execute`, with `values.py` open on the
    side.
 
-Part 2 will cover the stages that did not fit here: how window
+Part 2 covers the stages that did not fit here: how window
 functions are precomputed in a separate pass over the filtered rows
 before projection (and why mixing them with GROUP BY is an error, for
 now), how recursive CTEs iterate until an iteration adds nothing, and
 how the opt-in columnar engine recompiles the WHERE clause of a narrow
 query shape into list comprehensions over whole columns, checked row
 for row against the row engine it runs alongside.
+
+[Read part 2: windows, recursion, and a second
+engine](how-squeal-works-2.md).

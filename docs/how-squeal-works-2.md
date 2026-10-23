@@ -1,6 +1,7 @@
 # How squeal works, part 2: windows, recursion, and a second engine
 
-Part 1 walked a plain query through squeal's fixed pipeline: lexer,
+[Part 1](how-squeal-works-1.md) walked a plain query through squeal's
+fixed pipeline: lexer,
 parser, no optimizer, executor. Three features in the dialect do not
 fit that plain pipeline, and each earned its own machinery. This post
 opens all three, again straight from the source: window functions,

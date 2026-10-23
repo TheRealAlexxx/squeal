@@ -174,6 +174,10 @@ The executor is deliberately row-based. There is no query optimizer;
 EXPLAIN shows the fixed pipeline with the stages your query activates.
 That keeps the whole execution model in your head, which is the point.
 
+Two source tours walk the whole thing: [How squeal works, part 1: from
+SQL text to an answer](docs/how-squeal-works-1.md) and [part 2:
+windows, recursion, and a second engine](docs/how-squeal-works-2.md).
+
 ## Develop and test
 
 ```
