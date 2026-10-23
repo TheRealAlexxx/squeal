@@ -178,6 +178,27 @@ WITH_COMPOUND_QUERIES = [
      "select n from x intersect select 2", True),
 ]
 
+WITH_SUBQUERY_QUERIES = [
+    # a WITH clause inside a correlated scalar subquery
+    ("select name, (with big as (select amount from purchases "
+     "where amount > 200) select count(*) from big) "
+     "from people order by name", True),
+    # the CTE inside the subquery references the outer row
+    ("select name, (with mine as (select amount from purchases "
+     "where customer_id = customers.id) "
+     "select coalesce(sum(amount), 0) from mine) "
+     "from customers order by name", True),
+    # EXISTS over a WITH-carrying correlated subquery
+    ("select name from customers where exists "
+     "(with big as (select * from purchases where amount > 300) "
+     "select 1 from big where customer_id = customers.id) "
+     "order by name", True),
+    # uncorrelated WITH subquery in WHERE
+    ("select name from people where age > "
+     "(with a as (select avg(age) as v from people) select v from a) "
+     "order by name", True),
+]
+
 RECURSIVE_QUERIES = [
     ("with recursive x(n) as (select 1 union all "
      "select n + 1 from x where n < 5) select * from x order by n", True),
@@ -339,7 +360,7 @@ class DifferentialTests(unittest.TestCase):
 
     def test_strict_queries_match_sqlite(self):
         queries = list(STRICT_QUERIES) + RECURSIVE_QUERIES \
-            + WITH_COMPOUND_QUERIES
+            + WITH_COMPOUND_QUERIES + WITH_SUBQUERY_QUERIES
         if self.has_math:
             queries += MATH_QUERIES
         if self.has_right_full:
