@@ -157,10 +157,16 @@ row set and cannot mix with GROUP BY.
 - A positional ORDER BY or GROUP BY reference must point at a real
   expression; `select * from t order by 1` fails because `*` is not
   one.
-- SQLite errors on a named ORDER BY over a recursive CTE and silently
-  ignores a positional one. squeal applies ORDER BY and LIMIT on a
-  recursive CTE to the accumulated rows, so the same query can return
-  different (and, squeal would argue, the promised) rows.
+- ORDER BY in SQLite's recursive-select is not a result sort: it is a
+  queue-extraction priority that changes traversal order (breadth
+  first by default, ORDER BY ... DESC gives depth first), and only
+  positional terms are accepted - a named term errors ("1st ORDER BY
+  term does not match any column in the result set"). Verified against
+  SQLite 3.37.2 with branching-graph probes, per
+  https://sqlite.org/lang_with.html. squeal instead applies ORDER BY
+  and LIMIT on a recursive CTE to the accumulated rows after
+  iteration, so the same query can return different (and, squeal
+  would argue, the promised) rows.
 - There is no CAST. Types come from the CSV, so `cast(age as text)`
   fails at parse time with a pointer at the `as`. If you need a number
   as text, export and convert, or use || with an empty string:

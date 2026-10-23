@@ -101,6 +101,29 @@ class RecursiveTests(unittest.TestCase):
                 "select a.n + b.n from x a join x b on a.n = b.n) "
                 "select * from x limit 3")
 
+    def test_aggregate_in_recursive_term_is_rejected(self):
+        with self.assertRaises(SquealError):
+            run("with recursive x(n) as (select 1 union all "
+                "select max(n) + 1 from x where n < 5) select * from x")
+
+    def test_window_in_recursive_term_is_rejected(self):
+        with self.assertRaises(SquealError):
+            run("with recursive x(n) as (select 1 union all "
+                "select row_number() over () + 1 from x where n < 5) "
+                "select * from x")
+
+    def test_group_by_in_recursive_term_is_rejected(self):
+        with self.assertRaises(SquealError):
+            run("with recursive x(n) as (select 1 union all "
+                "select n + 1 from x where n < 5 group by n) "
+                "select * from x")
+
+    def test_distinct_in_recursive_term_is_allowed(self):
+        out = run("with recursive x(n) as (select 1 union all "
+                  "select distinct n + 1 from x where n < 5) "
+                  "select * from x order by n")
+        self.assertEqual(out.rows, [(i,) for i in range(1, 6)])
+
     def test_recursive_reference_inside_subquery_is_rejected(self):
         with self.assertRaises(SquealError):
             run("with recursive x(n) as (select 1 union all "

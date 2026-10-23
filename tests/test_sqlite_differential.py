@@ -200,10 +200,11 @@ KNOWN_DIVERGENCES = {
     "with recursive x(n) as (select 1 union all "
     "select n + 1 from x where n < 9 order by n desc limit 3) "
     "select * from x":
-        "SQLite errors on a named ORDER BY over a recursive CTE and "
-        "silently ignores a positional one; squeal applies ORDER BY and "
-        "LIMIT to the accumulated rows, which is the semantics its docs "
-        "promise",
+        "ORDER BY in SQLite's recursive-select is a queue-extraction "
+        "priority, not a result sort (positional terms only; a named "
+        "term errors on SQLite 3.37.2), so it changes traversal order "
+        "but never sorts the output; squeal instead applies ORDER BY "
+        "and LIMIT on the CTE to the accumulated rows after iteration",
     "select 7 / 2, 9 / 4":
         "SQLite truncates integer division; squeal always does true division",
     "select 1 / 0":

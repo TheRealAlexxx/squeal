@@ -709,6 +709,20 @@ def _materialize_recursive(name, cte, wrapped, exec_cache, outer, stats,
     if len(in_source) != 1:
         raise SquealError("recursive WITH query %s: the recursive term must "
                           "scan %s exactly once" % (name, name))
+    # The recursive term computes new rows from one working table at a
+    # time, so anything that would aggregate or rank across levels has
+    # no honest meaning here. SQLite rejects these too ("recursive
+    # aggregate queries not supported"); DISTINCT stays allowed.
+    if rec.group_by or rec.having is not None:
+        raise SquealError("recursive WITH query %s: the recursive term "
+                          "cannot use GROUP BY or HAVING" % name)
+    for expr, _ in rec.items:
+        if has_aggregate(expr):
+            raise SquealError("recursive WITH query %s: the recursive "
+                              "term cannot use aggregate functions" % name)
+        if any(isinstance(n, ast.WindowCall) for n in expr.walk()):
+            raise SquealError("recursive WITH query %s: the recursive "
+                              "term cannot use window functions" % name)
 
     anchor_result = execute(_core_of(sel), wrapped, None, exec_cache, outer)
     columns = list(anchor_result.columns)
