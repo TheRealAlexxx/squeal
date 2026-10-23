@@ -215,6 +215,18 @@ class Parser:
                     self.advance()
                 self.expect_kw("join")
                 kind = "left"
+            elif self.at_kw("right"):
+                self.advance()
+                if self.at_kw("outer"):
+                    self.advance()
+                self.expect_kw("join")
+                kind = "right"
+            elif self.at_kw("full"):
+                self.advance()
+                if self.at_kw("outer"):
+                    self.advance()
+                self.expect_kw("join")
+                kind = "full"
             elif self.at_kw("cross"):
                 self.advance()
                 self.expect_kw("join")

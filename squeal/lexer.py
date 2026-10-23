@@ -12,7 +12,8 @@ KEYWORDS = {
     "offset", "as", "and", "or", "not", "null", "true", "false", "asc",
     "desc", "distinct", "case", "when", "then", "else", "end", "in", "is",
     "like", "between",
-    "explain", "join", "inner", "left", "outer", "on", "cross", "exists",
+    "explain", "join", "inner", "left", "right", "full", "outer", "on",
+    "cross", "exists",
     "over", "partition", "analyze", "create", "view", "drop", "if",
 }
 

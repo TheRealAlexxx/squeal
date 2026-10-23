@@ -133,3 +133,35 @@ class JoinStrategyTests(unittest.TestCase):
         self.assertEqual([row[1] for row in r.rows],
                          ["keyboard", "mouse", "monitor", "cable"])
 
+
+
+class OuterJoinTests(unittest.TestCase):
+    def test_right_join(self):
+        r = run("select c.name, p.item from customers c "
+                "right join purchases p on c.id = p.customer_id order by p.id")
+        self.assertEqual(len(r.rows), 5)
+        self.assertEqual(r.rows[3], (None, "laptop"))  # customer 9 is missing
+
+    def test_full_join(self):
+        r = run("select c.name, p.item from customers c "
+                "full join purchases p on c.id = p.customer_id")
+        self.assertEqual(len(r.rows), 6)  # 4 matched + Edsger + the orphan laptop
+
+    def test_full_join_null_sides(self):
+        r = run("select count(*) from customers c full join purchases p "
+                "on c.id = p.customer_id where c.name is null or p.item is null")
+        self.assertEqual(r.rows[0][0], 2)
+
+    def test_right_join_aggregated(self):
+        r = run("select count(c.name) from customers c "
+                "right join purchases p on c.id = p.customer_id")
+        self.assertEqual(r.rows[0][0], 4)  # NULL name from the orphan row not counted
+
+    def test_outer_keyword_optional(self):
+        r = run("select count(*) from customers c full outer join purchases p "
+                "on c.id = p.customer_id")
+        self.assertEqual(r.rows[0][0], 6)
+        r = run("select count(*) from customers c right outer join purchases p "
+                "on c.id = p.customer_id")
+        self.assertEqual(r.rows[0][0], 5)
+

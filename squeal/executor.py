@@ -414,17 +414,24 @@ def scan_source(node, resolve):
             return schema, _hash_join(node, keys, schema,
                                       left_schema, left_rows,
                                       right_schema, right_rows)
+        matched_right = set()
         rows = []
         for lrow in left_rows:
             matched = False
-            for rrow in right_rows:
+            for r_i, rrow in enumerate(right_rows):
                 combined = lrow + rrow
                 if node.on is None or truthy(
                         eval_expr(node.on, RowContext(schema, combined))) is True:
                     matched = True
+                    matched_right.add(r_i)
                     rows.append(combined)
-            if not matched and node.kind == "left":
+            if not matched and node.kind in ("left", "full"):
                 rows.append(lrow + (None,) * len(right_schema))
+        if node.kind in ("right", "full"):
+            left_pad = (None,) * len(left_schema)
+            for r_i, rrow in enumerate(right_rows):
+                if r_i not in matched_right:
+                    rows.append(left_pad + rrow)
         return schema, rows
     raise SquealError("cannot scan %r" % (node,))
 
@@ -437,21 +444,28 @@ def _hash_join(node, keys, schema, left_schema, left_rows,
     """
     lexpr, rexpr = keys
     buckets = {}
-    for rrow in right_rows:
+    for r_i, rrow in enumerate(right_rows):
         key = _hashable(eval_expr(rexpr, RowContext(right_schema, rrow)))
         if key is None:
             continue
-        buckets.setdefault(key, []).append(rrow)
+        buckets.setdefault(key, []).append(r_i)
+    matched_right = set()
     rows = []
     for lrow in left_rows:
         key = _hashable(eval_expr(lexpr, RowContext(left_schema, lrow)))
         matches = buckets.get(key, []) if key is not None else []
         matched = False
-        for rrow in matches:
+        for r_i in matches:
             matched = True
-            rows.append(lrow + rrow)
-        if not matched and node.kind == "left":
+            matched_right.add(r_i)
+            rows.append(lrow + right_rows[r_i])
+        if not matched and node.kind in ("left", "full"):
             rows.append(lrow + (None,) * len(right_schema))
+    if node.kind in ("right", "full"):
+        left_pad = (None,) * len(left_schema)
+        for r_i, rrow in enumerate(right_rows):
+            if r_i not in matched_right:
+                rows.append(left_pad + rrow)
     return rows
 
 
