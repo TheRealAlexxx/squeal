@@ -142,6 +142,7 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
     lines = plan(select, resolve)
     out = []
     join_seen = False
+    suppress = set()  # stages of a recursive CTE pipeline: no fake counts
     table_counts = iter(stats.get("table_rows", []))
     compound_counts = iter(stats.get("compound_ops", []))
     # compound plans: each core measured separately; the op line hands
@@ -150,7 +151,9 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
     cur_core = next(core_stats)
     for i, (_, text) in enumerate(lines):
         note = ""
-        if text.startswith("Scan  "):
+        if i in suppress:
+            pass
+        elif text.startswith("Scan  "):
             # a Scan over a WITH name is counted from its materialization,
             # not from a file
             base = text[6:].strip().split(" as ")[0].strip()
@@ -173,11 +176,28 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
             note = "%d rows" % cur_core.get("projected", 0)
         elif text.startswith("Cte  "):
             name = text[5:].strip()
+            recursive_cte = name.endswith(" (recursive)")
+            if recursive_cte:
+                name = name[: -len(" (recursive)")]
             rows = stats.get("cte_rows", {}).get(name)
             if rows is not None:
                 note = "%d rows" % rows
-            # stages below this line belong to the CTE's own pipeline
-            cur_core = stats.get("cte_stats", {}).get(name, cur_core)
+            # stages below this line belong to the CTE's own pipeline.
+            # Two cases have no honest per-stage numbers. A recursive
+            # CTE ran each stage once per iteration with different row
+            # counts, so one number would be fiction. An unused CTE
+            # never ran at all. Both render their stages without notes;
+            # the Cte line's materialized row count carries the fact.
+            cte_stats = stats.get("cte_stats", {})
+            if recursive_cte or name not in cte_stats:
+                cur_core = {}
+                for j in range(i + 1, len(lines)):
+                    nxt = lines[j][1]
+                    if nxt.startswith("Cte  "):
+                        break
+                    suppress.add(j)
+            else:
+                cur_core = cte_stats[name]
         elif text.startswith(("Union", "Intersect", "Except")):
             count = next(compound_counts, None)
             if count is not None:

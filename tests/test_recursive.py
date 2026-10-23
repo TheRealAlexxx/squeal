@@ -210,6 +210,46 @@ class RecursiveTests(unittest.TestCase):
                   "select * from doubled order by m")
         self.assertEqual(out.rows, [(2,), (4,), (6,), (8,)])
 
+    def test_explain_analyze_is_honest_about_iteration(self):
+        # each stage of a recursive pipeline runs once per iteration, so
+        # per-stage measured counts would be fiction: the Cte line shows
+        # the materialized row count and its stages carry no notes
+        from squeal.cli import Session
+        out = Session().run(
+            "explain analyze with recursive x(n) as (select 1 union all "
+            "select n + 1 from x where n < 5) select * from x")
+        self.assertIn("Cte  x (recursive)   -- 5 rows", out)
+        for stage in ("Filter  (n < 5)", "Project  (n + 1)", "Union All"):
+            for line in out.splitlines():
+                if stage in line:
+                    self.assertNotIn("--", line,
+                                     "recursive stage gained a count: " + line)
+
+    def test_explain_analyze_plain_cte_next_to_recursive(self):
+        from squeal.cli import Session
+        out = Session().run(
+            "explain analyze with recursive doubled as (select 2 as m), "
+            "x(n) as (select 1 union all "
+            "select n + 1 from x where n < 3) "
+            "select n, (select m from doubled) from x")
+        self.assertIn("Cte  x (recursive)   -- 3 rows", out)
+        # the used plain CTE keeps its measured pipeline
+        self.assertIn("Cte  doubled   -- 1 rows", out)
+
+    def test_explain_analyze_unused_cte_gets_no_counts(self):
+        # an unused CTE never runs; annotating its stages with the outer
+        # pipeline's counts would be fiction
+        from squeal.cli import Session
+        out = Session().run(
+            "explain analyze with recursive ghost as (select 99 as g), "
+            "x(n) as (select 1 union all "
+            "select n + 1 from x where n < 3) "
+            "select * from x")
+        for line in out.splitlines():
+            if "Cte  ghost" in line or "Project  99" in line:
+                self.assertNotIn("--", line,
+                                 "unused CTE gained a count: " + line)
+
     def test_explain_marks_recursive_ctes(self):
         from squeal.explain import render
         text = render(parse("with recursive x(n) as (select 1 union all "
