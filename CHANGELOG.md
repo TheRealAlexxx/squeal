@@ -7,6 +7,19 @@
   pinned.test holding hand-verified dialect differences; the README
   count is asserted by the test suite
 
+- Correlated subqueries: the inner query may reference outer columns;
+  uncorrelated results stay cached per statement, correlated ones run
+  per outer row with the correlation verdict memoized
+- Views: CREATE VIEW name AS SELECT and DROP VIEW [IF EXISTS];
+  session-level named queries, validated at creation, materialized
+  fresh on each use; views may reference other views, self-reference
+  is an error
+- Columnar engine (issue #4): an alternate evaluation path for simple
+  single-table scans that compiles the WHERE clause into list
+  comprehensions over whole columns; anything outside the subset
+  bails to the row engine, and tests/test_columnar.py holds the two
+  engines row for row equal
+
 - Compound selects: UNION, UNION ALL, INTERSECT, EXCEPT, with SQLite's
   equal-precedence left-to-right rule
 - WITH clauses: named statement-scoped subqueries, materialized on

@@ -10,7 +10,7 @@ It is not fast, and it does not pretend to be: on the measured set it
 runs 7x to 121x slower than SQLite ([honest numbers](docs/benchmarks.md)).
 The point is the other direction. The whole engine fits in your head,
 the dialect is one documented page with its differences called out,
-and correctness is a published, checkable claim: 291 tests plus an
+and correctness is a published, checkable claim: 294 tests plus an
 80-record [sqllogictest corpus](tests/sqllogictest) verified against
 SQLite, with every deliberate difference pinned and explained.
 
@@ -183,7 +183,7 @@ PYTHONPATH=. python3 -m unittest discover -s tests
 The suite covers the lexer, parser, value semantics, executor, joins,
 subqueries, window functions, the playground bridge, the columnar
 engine's row-for-row parity with the row engine, and the CLI end to
-end: 291 tests. CI
+end: 294 tests. CI
 runs it on Python 3.9 through 3.12.
 
 The published correctness claim is a sqllogictest subset: 80 records

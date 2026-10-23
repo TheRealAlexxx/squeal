@@ -58,10 +58,10 @@ work after the subquery fixes:
    for everything else, took filter + count from 28 ms to 9 ms.
    Schema lookups are memoized along the way.
 
- SQLite is C with decades of tuning, so
-the single-digit-to-50x gap above is the honest cost of that trade. Where the gap
+ SQLite is C with decades of tuning, so the
+7x to 121x gap above is the honest cost of that trade. Where the gap
 is smallest (window functions, grouping) squeal is doing nearly the
-same work SQLite is; where it is largest (sorting, scanning) the
+same work SQLite is; where it is largest (recursion, sorting) the
 interpreter overhead dominates. It is fast enough to be useful on real
 CSVs and slow enough to keep the code honest. That trade is deliberate.
 
@@ -108,6 +108,9 @@ of the table above on the same 100k rows measured 2.1x, 3.6x, 3.7x,
 memory use, or concurrency; treat all of this as evidence, not proof.
 
 What the experiment does not do: beats SQLite. The columnar filter +
-count above is still ~60x slower than SQLite's 0.6 ms on 10k rows.
-The win is real but it is a constant-factor win inside a pure-Python
-interpreter, not a new league.
+count above runs 40 ms on 100k rows (0.4 us per row); SQLite runs a
+similar query shape in 0.7 ms on 10k rows in the table at the top
+(0.07 us per row). That is roughly 6x per row on similar query shapes
+and different datasets, even after the columnar win:
+real, but a constant-factor win inside a pure-Python interpreter, not
+a new league.
