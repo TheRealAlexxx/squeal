@@ -69,7 +69,18 @@ def _compound_plan(select, resolve=None):
 def plan(select, resolve=None):
     """Return the EXPLAIN tree as a list of (depth, text) lines."""
     if select.compounds:
-        return _compound_plan(select, resolve)
+        lines = _compound_plan(select, resolve)
+    else:
+        lines = _plain_plan(select, resolve)
+    for cte in select.ctes:
+        # WITH definitions are separate pipelines, listed after the main
+        # one, in declaration order
+        lines.append((0, "Cte  " + cte.name))
+        lines.extend(plan(cte.select, resolve))
+    return lines
+
+
+def _plain_plan(select, resolve=None):
     lines = []
     depth = 0
 
@@ -119,6 +130,10 @@ def plan(select, resolve=None):
     return lines
 
 
+# plan() used to end here; _plain_plan is the original body renamed so
+# plan() can append WITH pipelines after any compound structure
+
+
 def render_analyzed(select, resolve, stats, elapsed_ms):
     """The plan with the measured row counts attached to each stage."""
     lines = plan(select, resolve)
@@ -133,9 +148,16 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
     for i, (_, text) in enumerate(lines):
         note = ""
         if text.startswith("Scan  "):
-            count = next(table_counts, None)
-            if count is not None:
-                note = "%d rows" % count
+            # a Scan over a WITH name is counted from its materialization,
+            # not from a file
+            base = text[6:].strip().split(" as ")[0].strip()
+            cte_rows = stats.get("cte_rows", {})
+            if base in cte_rows:
+                note = "%d rows" % cte_rows[base]
+            else:
+                count = next(table_counts, None)
+                if count is not None:
+                    note = "%d rows" % count
         elif text.startswith(("Hash Join", "Nested Loop Join")) and not join_seen:
             join_seen = True
             note = "%d joined rows" % cur_core.get("scan", 0)
@@ -146,6 +168,13 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
             note = "%d groups" % cur_core.get("contexts", 0)
         elif text.startswith("Project"):
             note = "%d rows" % cur_core.get("projected", 0)
+        elif text.startswith("Cte  "):
+            name = text[5:].strip()
+            rows = stats.get("cte_rows", {}).get(name)
+            if rows is not None:
+                note = "%d rows" % rows
+            # stages below this line belong to the CTE's own pipeline
+            cur_core = stats.get("cte_stats", {}).get(name, cur_core)
         elif text.startswith(("Union", "Intersect", "Except")):
             count = next(compound_counts, None)
             if count is not None:

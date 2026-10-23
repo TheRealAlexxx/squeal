@@ -183,6 +183,16 @@ def _is_correlated(select, resolve):
     Errs toward correlated: a misclassified nested subquery just runs
     without caching, never with wrong results.
     """
+    if select.ctes:
+        # a WITH body can reach the outer scope; rather than tracking
+        # scopes through definitions, call the subquery correlated.
+        # That costs the per-statement cache, never correctness.
+        return True
+    cores = [select] + [core for _op, core in select.compounds]
+    return any(_core_is_correlated(core, resolve) for core in cores)
+
+
+def _core_is_correlated(select, resolve):
     if select.source is None:
         inner_names = set()
     else:
@@ -644,6 +654,55 @@ def _execute_compound(select, resolve, stats, exec_cache, outer):
     return Result(out_columns, acc)
 
 
+def _with_ctes(ctes, resolve, exec_cache, outer, stats):
+    """Statement-scoped WITH: each named query is materialized on first
+    use and shared for the rest of the statement, like the views and
+    cached subqueries already here. Later CTEs may use earlier ones; a
+    CTE that reaches itself is an error, same rule as views. A CTE name
+    shadows a table or view of the same name, the SQL rule."""
+    names = [c.name for c in ctes]
+    if len(set(names)) != len(names):
+        for name in names:
+            if names.count(name) > 1:
+                raise SquealError("duplicate WITH name: %s" % name)
+    defs = {c.name: c for c in ctes}
+    materialized = {}
+    in_progress = set()
+
+    def wrapped(name):
+        if name not in defs:
+            return resolve(name)
+        if name in materialized:
+            return materialized[name]
+        if name in in_progress:
+            raise SquealError("WITH query %s references itself" % name)
+        in_progress.add(name)
+        try:
+            cte = defs[name]
+            cstats = {} if stats is not None else None
+            result = execute(cte.select, wrapped, cstats, exec_cache, outer)
+            if stats is not None:
+                stats.setdefault("cte_stats", {})[name] = cstats
+        finally:
+            in_progress.discard(name)
+        columns = list(result.columns)
+        if cte.columns is not None:
+            if len(cte.columns) != len(columns):
+                raise SquealError(
+                    "WITH %s names %d column(s) but its query returns %d"
+                    % (name, len(cte.columns), len(columns)))
+            columns = list(cte.columns)
+        from .csvload import CsvTable
+        table = CsvTable(columns, result.rows, [str] * len(columns),
+                         "<with %s>" % name)
+        materialized[name] = table
+        if stats is not None:
+            stats.setdefault("cte_rows", {})[name] = len(result.rows)
+        return table
+
+    return wrapped
+
+
 def execute(select, source, stats=None, exec_cache=None, outer=None):
     # stats, when given, collects per-stage row counts for EXPLAIN ANALYZE;
     # exec_cache shares subquery results across the whole statement;
@@ -655,6 +714,8 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
         resolve = lambda _name, t=source: t
     else:
         resolve = source
+    if select.ctes:
+        resolve = _with_ctes(select.ctes, resolve, exec_cache, outer, stats)
     if select.compounds:
         return _execute_compound(select, resolve, stats, exec_cache, outer)
     if select.source is None:

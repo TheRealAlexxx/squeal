@@ -131,6 +131,23 @@ STRICT_QUERIES = [
     ("select age from people except select 36", False),
     # NULL ages dedupe to one; DESC puts NULLs last on both engines
     ("select age from people union select 99 order by 1 desc", True),
+    # WITH clauses
+    ("with high as (select name from people where age > 35) "
+     "select * from high order by name", True),
+    ("with a as (select city from people), "
+     "b as (select city from a where city <> 'London') "
+     "select distinct city from b order by 1", True),
+    ("with x(town) as (select city from people) "
+     "select town from x order by 1", True),
+    ("with x as (select city from people union select 'Lisbon') "
+     "select * from x order by city", True),
+    ("with c as (select city, count(*) as n from people group by city) "
+     "select * from c where n > 1 order by city", True),
+    ("with ages as (select age from people where age is not null) "
+     "select min(age), max(age), avg(age) from ages", False),
+    ("with x as (select city from people) "
+     "select a.city, b.city from x a join x b on a.city = b.city "
+     "order by 1 limit 5", True),
 ]
 
 # Queries needing a SQLite built with math functions (3.35+ or a distro

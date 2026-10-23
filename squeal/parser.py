@@ -126,10 +126,20 @@ class Parser:
         return ast.DropView(self.advance().text, if_exists)
 
     def parse_select(self):
-        # SQL's real grammar: select-core (compound-op select-core)*, with
-        # ORDER BY / LIMIT / OFFSET once at the very end for the whole
-        # statement. All compound ops share one precedence, left to right,
-        # the SQLite rule this dialect already follows elsewhere.
+        # SQL's real grammar: an optional WITH clause, then select-core
+        # (compound-op select-core)*, then ORDER BY / LIMIT / OFFSET once
+        # at the very end for the whole statement. All compound ops share
+        # one precedence, left to right, the SQLite rule this dialect
+        # already follows elsewhere.
+        ctes = []
+        if self.at_kw("with"):
+            self.advance()
+            if self.at_kw("recursive"):
+                self.fail("WITH RECURSIVE is not supported yet")
+            ctes.append(self.parse_cte())
+            while self.at_op(","):
+                self.advance()
+                ctes.append(self.parse_cte())
         first = self.parse_select_core()
         compounds = []
         while True:
@@ -171,7 +181,31 @@ class Parser:
         first.limit = limit
         first.offset = offset
         first.compounds = compounds
+        first.ctes = ctes
         return first
+
+    def parse_cte(self):
+        if self.cur.kind != IDENT:
+            self.fail("expected a name in the WITH clause, found %r"
+                      % self.cur.text)
+        name = self.advance().text
+        columns = None
+        if self.at_op("("):
+            self.advance()
+            columns = []
+            while True:
+                if self.cur.kind != IDENT:
+                    self.fail("expected a column name in WITH %s(...)" % name)
+                columns.append(self.advance().text)
+                if not self.at_op(","):
+                    break
+                self.advance()
+            self.expect_op(")")
+        self.expect_kw("as")
+        self.expect_op("(")
+        sel = self.parse_select()
+        self.expect_op(")")
+        return ast.Cte(name, columns, sel)
 
     def parse_compound_op(self):
         if self.at_kw("union"):
@@ -366,7 +400,7 @@ class Parser:
         if self.at_kw("in"):
             self.advance()
             self.expect_op("(")
-            if self.at_kw("select"):
+            if self.at_kw("select") or self.at_kw("with"):
                 values = [ast.Subquery(self.parse_select())]
                 self.expect_op(")")
                 return ast.InList(left, values, negated)
@@ -438,7 +472,7 @@ class Parser:
             return ast.Exists(inner)
         if self.at_op("("):
             self.advance()
-            if self.at_kw("select"):
+            if self.at_kw("select") or self.at_kw("with"):
                 inner = self.parse_select()
                 self.expect_op(")")
                 return ast.Subquery(inner)

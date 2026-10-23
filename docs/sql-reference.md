@@ -6,13 +6,17 @@ standard, the difference is called out.
 ## Statements
 
 ```
+[WITH name [(col, ...)] AS (select), ...]
 SELECT [DISTINCT] select_item [, ...]
   [FROM source]
   [WHERE expr]
   [GROUP BY expr [, ...]]
   [HAVING expr]
+  [compound-op SELECT ...]
   [ORDER BY expr [ASC|DESC] [, ...]]
   [LIMIT n [OFFSET n]]
+
+compound-op: UNION [ALL|DISTINCT] | INTERSECT | EXCEPT
 
 EXPLAIN [ANALYZE] SELECT ...
 
@@ -25,6 +29,33 @@ materialize fresh on every use, and may reference other views; a view
 that references itself is an error.
 
 A select item is `expr [AS alias]`, `*`, or a window call.
+
+### Compound selects
+
+`UNION`, `INTERSECT` and `EXCEPT` deduplicate rows; `UNION ALL` keeps
+duplicates. Dedupe treats NULL = NULL, like SELECT DISTINCT. The
+operators share one precedence and fold left to right (the SQLite
+rule), and every side must return the same number of columns; column
+names come from the first side. ORDER BY / LIMIT / OFFSET appear once,
+at the very end, and ORDER BY over a compound names an output column
+or a position, nothing else.
+
+### WITH
+
+A WITH clause names a query for the rest of the statement:
+
+```
+with high as (select name from people where age > 35),
+     senior(town) as (select city from people where age > 40)
+select * from high
+```
+
+Each name materializes on first use and is shared for the rest of the
+statement, including across sides of a compound and inside subqueries.
+Later CTEs may use earlier ones; a CTE that reaches itself is an
+error, like a self-referencing view. A CTE name shadows a table or
+view of the same name. An unused CTE is never evaluated. WITH
+RECURSIVE does not exist yet and fails at parse time.
 
 ## Sources
 
@@ -92,6 +123,9 @@ row set and cannot mix with GROUP BY.
   cases cheap.
 - A bare column in a grouped query reads the group's first row, the
   SQLite convention.
+- A positional ORDER BY or GROUP BY reference must point at a real
+  expression; `select * from t order by 1` fails because `*` is not
+  one.
 - There is no CAST. Types come from the CSV, so `cast(age as text)`
   fails at parse time with a pointer at the `as`. If you need a number
   as text, export and convert, or use || with an empty string:

@@ -75,11 +75,13 @@ class Session:
         if not isinstance(select, ast.Select):
             return self.run_statement(select)
         if select.explain:
-            sources = [select.source] + [core.source
-                                         for _op, core in select.compounds]
+            sources = _explain_sources(select)
+            cte_names = {n.name for n in select.walk()
+                         if isinstance(n, ast.Cte)}
             for src in sources:
                 for ref in table_refs(src):
-                    self.resolve(ref.name)  # fail early on a bad path
+                    if ref.name not in cte_names:
+                        self.resolve(ref.name)  # fail early on a bad path
             prefix = ""
             if self.engine == "columnar" and not select.analyze:
                 prefix = "engine: " + self._planned_engine(select) + "\n"
@@ -88,7 +90,8 @@ class Session:
                 from .explain import render_analyzed
                 stats = {"table_rows": [len(self.resolve(ref.name).rows)
                                         for src in sources
-                                        for ref in table_refs(src)]}
+                                        for ref in table_refs(src)
+                                        if ref.name not in cte_names]}
                 start = time.perf_counter()
                 execute(select, self.resolve, stats)
                 elapsed = (time.perf_counter() - start) * 1000
@@ -121,6 +124,8 @@ class Session:
     def _columnar_note(self, select):
         """Why the columnar engine will not take this query, or None."""
         from . import astnodes as ast
+        if select.ctes:
+            return "columnar: WITH clauses are outside the subset, using the row engine"
         if select.compounds:
             return "columnar: compound selects are outside the subset, using the row engine"
         if not isinstance(select.source, ast.TableRef):
@@ -143,6 +148,22 @@ class Session:
         if columnar.covers(select, self.resolve(select.source.name)):
             return "columnar"
         return "row (outside the columnar subset)"
+
+
+def _explain_sources(select):
+    """Every core's source, in the order EXPLAIN prints them: the main
+    pipeline, its compound cores, then each WITH pipeline."""
+    out = []
+
+    def visit(sel):
+        out.append(sel.source)
+        for _op, core in sel.compounds:
+            visit(core)
+        for cte in sel.ctes:
+            visit(cte.select)
+
+    visit(select)
+    return out
 
 
 def table_refs(node):

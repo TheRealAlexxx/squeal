@@ -15,7 +15,7 @@ KEYWORDS = {
     "explain", "join", "inner", "left", "right", "full", "outer", "on",
     "cross", "exists",
     "over", "partition", "analyze", "create", "view", "drop", "if",
-    "union", "all", "intersect", "except",
+    "union", "all", "intersect", "except", "with", "recursive",
 }
 
 TWO_CHAR_OPS = ("!=", "<>", "<=", ">=", "||")

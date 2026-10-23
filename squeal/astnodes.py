@@ -236,14 +236,26 @@ class DropView(Node):
         return "DropView(%s)" % self.name
 
 
+class Cte(Node):
+    __slots__ = ("name", "columns", "select")
+
+    def __init__(self, name, columns, select):
+        self.name = name
+        self.columns = columns    # [str] or None
+        self.select = select
+
+    def __repr__(self):
+        return "Cte(%s)" % self.name
+
+
 class Select(Node):
     __slots__ = ("distinct", "items", "source", "where", "group_by",
                  "having", "order_by", "limit", "offset", "explain",
-                 "analyze", "compounds")
+                 "analyze", "compounds", "ctes")
 
     def __init__(self, distinct, items, source, where, group_by, having,
                  order_by, limit, offset, explain=False, analyze=False,
-                 compounds=()):
+                 compounds=(), ctes=()):
         self.explain = explain
         self.analyze = analyze
         self.distinct = distinct
@@ -257,6 +269,7 @@ class Select(Node):
         self.offset = offset
         self.compounds = compounds  # [(op, core Select)]; op in
                                     # union, union_all, intersect, except
+        self.ctes = ctes            # [Cte], statement-scoped WITH clause
 
     def __repr__(self):
         return "Select(%d items from %s)" % (len(self.items), self.source)
