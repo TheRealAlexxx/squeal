@@ -152,6 +152,32 @@ STRICT_QUERIES = [
 
 # Queries needing a SQLite built with math functions (3.35+ or a distro
 # that enabled them). Skipped when the local SQLite lacks them.
+WITH_COMPOUND_QUERIES = [
+    # a CTE used on both sides of a compound is materialized once
+    ("with london as (select name from people where city = 'London') "
+     "select * from london union all select * from london order by name", True),
+    # a compound inside a CTE
+    ("with both(x) as (select 1 union select 2) "
+     "select x from both order by x", True),
+    # INTERSECT dedupes; city has no NULLs in the fixture
+    ("select city from people intersect select city from people "
+     "order by city", True),
+    # EXCEPT removes the London rows
+    ("select city from people except "
+     "select city from people where city = 'London' order by city", True),
+    # a later CTE builds on an earlier one across compound sides
+    ("with a as (select 1 as x), b as (select x + 1 as x from a) "
+     "select x from a union all select x from b order by x", True),
+    # a recursive CTE feeding a compound
+    ("with recursive x(n) as (select 1 union all "
+     "select n + 1 from x where n < 3) "
+     "select n from x union all select 99 order by n", True),
+    # a recursive CTE on one side of INTERSECT
+    ("with recursive x(n) as (select 1 union all "
+     "select n + 1 from x where n < 3) "
+     "select n from x intersect select 2", True),
+]
+
 RECURSIVE_QUERIES = [
     ("with recursive x(n) as (select 1 union all "
      "select n + 1 from x where n < 5) select * from x order by n", True),
@@ -197,6 +223,10 @@ OUTER_QUERIES = [
 # diverging; if one starts matching, squeal grew SQLite-compatible there
 # and the list must be updated.
 KNOWN_DIVERGENCES = {
+    "select score from people union select score from people "
+    "order by score":
+        "SQLite sorts NULLs first ascending; squeal always puts NULLs "
+        "last, here over a deduped UNION of the score column",
     "with recursive x(n) as (select 1 union all "
     "select n + 1 from x where n < 9 order by n desc limit 3) "
     "select * from x":
@@ -308,7 +338,8 @@ class DifferentialTests(unittest.TestCase):
         return expected, got, rows_match(expected, got, ordered)
 
     def test_strict_queries_match_sqlite(self):
-        queries = list(STRICT_QUERIES) + RECURSIVE_QUERIES
+        queries = list(STRICT_QUERIES) + RECURSIVE_QUERIES \
+            + WITH_COMPOUND_QUERIES
         if self.has_math:
             queries += MATH_QUERIES
         if self.has_right_full:
