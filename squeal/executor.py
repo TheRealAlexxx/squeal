@@ -92,6 +92,45 @@ def eval_expr(node, ctx):
         value = eval_expr(node.expr, ctx)
         if value is None:
             return None
+        mode_key = ("inlist-mode", id(node))
+        if mode_key not in ctx.exec_cache:
+            subqueries = [c for c in node.values if isinstance(c, ast.Subquery)]
+            ctx.exec_cache[mode_key] = subqueries if subqueries and all(
+                not _is_correlated(c.select, ctx.resolve) for c in subqueries) else None
+        subqueries = ctx.exec_cache[mode_key] or []
+        cacheable = bool(subqueries)
+        if cacheable:
+            # subquery candidates are constant for the statement: materialize
+            # once, and probe a hash set instead of scanning per outer row
+            cache_key = ("inlist", id(node))
+            if cache_key not in ctx.exec_cache:
+                vals = []
+                for candidate in subqueries:
+                    result = _subquery_rows(candidate.select, ctx)
+                    if len(result.columns) != 1:
+                        raise SquealError("an IN subquery must return "
+                                          "exactly one column")
+                    vals.extend(row[0] for row in result.rows)
+                probe = {_hashable(v) for v in vals if v is not None}
+                ctx.exec_cache[cache_key] = (
+                    vals, probe, any(v is None for v in vals))
+            vals, probe, seen_null = ctx.exec_cache[cache_key]
+            found = _hashable(value) in probe
+            if not found and len(subqueries) < len(node.values):
+                # expression candidates mixed in: evaluate them per row
+                for candidate in node.values:
+                    if isinstance(candidate, ast.Subquery):
+                        continue
+                    eq = compare("=", value, eval_expr(candidate, ctx))
+                    if eq is True:
+                        found = True
+                    elif eq is None:
+                        seen_null = True
+            if found:
+                return False if node.negated else True
+            if node.negated:
+                return None if seen_null else True
+            return None if seen_null else False
         candidates = []
         for candidate in node.values:
             if isinstance(candidate, ast.Subquery):
@@ -166,7 +205,11 @@ def _is_correlated(select, resolve):
 def _subquery_rows(select, ctx):
     if ctx.resolve is None:
         raise SquealError("subqueries need a table source")
-    if _is_correlated(select, ctx.resolve):
+    # the correlation verdict is structural: decide once per statement
+    corr_key = ("correlated", id(select))
+    if corr_key not in ctx.exec_cache:
+        ctx.exec_cache[corr_key] = _is_correlated(select, ctx.resolve)
+    if ctx.exec_cache[corr_key]:
         # correlated: runs once per outer row, sees the outer scope
         return execute(select, ctx.resolve, exec_cache=ctx.exec_cache, outer=ctx)
     # uncorrelated: pure, so run once per statement
