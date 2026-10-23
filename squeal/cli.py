@@ -228,7 +228,7 @@ def main(argv=None):
         # piped stdin is a script: run every statement in order
         # skip pasted REPL metacommands, nothing else: a SQL line can
         # legitimately start with a dot (e.g. the literal .5)
-        meta = (".quit", ".exit", "\q", ".tables", ".views", ".help")
+        meta = (".quit", ".exit", "\\q", ".tables", ".views", ".help")
         script = "\n".join(line for line in sys.stdin.read().splitlines()
                            if line.strip() not in meta)
         try:

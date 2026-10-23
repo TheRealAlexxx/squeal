@@ -173,6 +173,11 @@ function showError(text, pos) {
 
 function clearUnderline() { $("#editor-backdrop").textContent = ""; }
 
+function clearError() {
+  $("#error").hidden = true;
+  clearUnderline();
+}
+
 function underlineError(pos) {
   clearUnderline();
   if (!pos) return;
@@ -289,7 +294,7 @@ async function runQuery() {
   const sql = $("#sql").value.trim().replace(/;+\s*$/, "");
   if (!sql) return;
   $("#run").disabled = true;
-  $("#error").hidden = true;
+  clearError();
   $("#message").hidden = true;
   setStatus("running…");
   let outcome;
@@ -341,7 +346,7 @@ function tableNameFor(fileName) {
 }
 
 async function mountFiles(fileList) {
-  $("#error").hidden = true;
+  clearError();
   $("#message").hidden = true;
   for (const file of fileList) {
     if (!/\.csv$/i.test(file.name)) { setStatus("skipped " + file.name + ": not a .csv"); continue; }
@@ -423,10 +428,28 @@ function showTab(which) {
   $("#plan-output").hidden = !isPlan;
 }
 
+function stripPlanPrefix(rendered) {
+  // runPlan prefixes the SQL with "explain analyze "; a failed plan should
+  // echo the query the user wrote, with the caret where they expect it
+  const prefix = "explain analyze ";
+  const lines = String(rendered).split("\n");
+  const sqlLine = lines.findIndex((l) => l.startsWith("  " + prefix));
+  if (sqlLine === -1) return rendered;
+  lines[sqlLine] = "  " + lines[sqlLine].slice(2 + prefix.length);
+  const caretLine = lines[sqlLine + 1] || "";
+  const caretAt = caretLine.indexOf("^");
+  if (caretAt >= 2 + prefix.length) {
+    lines[sqlLine + 1] = caretLine.slice(0, caretAt - prefix.length) + "^";
+  }
+  return lines.join("\n");
+}
+
 async function runPlan() {
   const sql = $("#sql").value.trim().replace(/;+\s*$/, "");
   if (!sql) return;
   $("#plan").disabled = true;
+  clearError();
+  $("#message").hidden = true;
   setStatus("planning…");
   let outcome;
   try {
@@ -437,7 +460,8 @@ async function runPlan() {
   $("#plan").disabled = false;
   showTab("plan");
   if (!outcome.ok) {
-    $("#plan-output").textContent = outcome.rendered || ("error: " + outcome.error);
+    $("#plan-output").textContent =
+      stripPlanPrefix(outcome.rendered || ("error: " + outcome.error));
     setStatus("plan failed");
     return;
   }

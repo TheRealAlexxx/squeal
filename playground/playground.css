@@ -148,6 +148,15 @@ body.dragging .upload { border-color: var(--accent); color: var(--text); }
   padding: 4px 12px; cursor: pointer;
 }
 #share:hover { color: var(--text); border-color: var(--accent-dim); }
+
+@media (pointer: coarse) {
+  #run, #plan, #share, .tab {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
 .share-note {
   color: var(--muted); font-size: 12px; margin: -4px 0 10px;
 }

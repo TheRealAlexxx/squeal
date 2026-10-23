@@ -43,6 +43,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.count("(1 row)"), 2)
 
+    def test_stdin_skips_backslash_metacommands(self):
+        # pasted REPL metacommands are skipped in piped scripts,
+        # including the backslash form
+        r = cli(stdin="select 1 as a;\n\\q\nselect 2 as b;\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("(1 row)"), 2)
+
+    def test_cli_source_compiles_without_warnings(self):
+        # guards the invalid-escape regression: a single-backslash
+        # metacommand literal trips SyntaxWarning on newer Pythons
+        import py_compile
+        import tempfile
+        import warnings
+        with warnings.catch_warnings(), tempfile.TemporaryDirectory() as tmp:
+            warnings.simplefilter("error", SyntaxWarning)
+            py_compile.compile(os.path.join(ROOT, "squeal", "cli.py"),
+                               cfile=os.path.join(tmp, "cli.pyc"),
+                               doraise=True)
+
     def test_error_exit_code(self):
         r = cli("select from")
         self.assertEqual(r.returncode, 1)
