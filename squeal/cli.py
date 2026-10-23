@@ -22,10 +22,11 @@ from .render import as_csv, as_json, as_table
 class Session:
     """Loaded tables and views, keyed by the name queries use for them."""
 
-    def __init__(self):
+    def __init__(self, engine="row"):
         self.tables = {}
         self.views = {}
         self._resolving = set()
+        self.engine = engine
 
     def resolve(self, source):
         if source in self.views:
@@ -90,6 +91,19 @@ class Session:
             # no FROM: one row computed from thin air
             from .csvload import CsvTable
             return execute(select, CsvTable([], [()], [], "<memory>"))
+        if self.engine == "columnar":
+            from . import astnodes as ast
+            from . import columnar
+            if isinstance(select.source, ast.TableRef):
+                table = self.resolve(select.source.name)
+                # views come back all-text typed; the columnar compiler
+                # trusts declared types, so only real CSVs qualify
+                if table.path.endswith(".csv"):
+                    result = columnar.run(select, table)
+                    if result is not None:
+                        return result
+                    print("columnar: query outside the subset, "
+                          "using the row engine", file=sys.stderr)
         return execute(select, self.resolve)
 
 
@@ -171,10 +185,13 @@ def main(argv=None):
     parser.add_argument("query", nargs="?", help="the SQL query; omit for a REPL")
     parser.add_argument("--format", choices=sorted(FORMATS), default="table",
                         help="output format (default: table)")
+    parser.add_argument("--engine", choices=("row", "columnar"), default="row",
+                        help="execution engine: columnar is the whole-column "
+                             "experiment for simple scans (default: row)")
     parser.add_argument("--version", action="version", version="squeal " + VERSION)
     args = parser.parse_args(argv)
 
-    session = Session()
+    session = Session(engine=args.engine)
     if args.query is None and not sys.stdin.isatty():
         # piped stdin is a script: run every statement in order
         # skip pasted REPL metacommands, nothing else: a SQL line can
