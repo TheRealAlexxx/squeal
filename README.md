@@ -154,7 +154,7 @@ PYTHONPATH=. python3 -m unittest discover -s tests
 ```
 
 The suite covers the lexer, parser, value semantics, executor, joins,
-subqueries, window functions, and the CLI end to end: 134 tests. CI
+subqueries, window functions, the playground bridge, and the CLI end to end: 187 tests. CI
 runs it on Python 3.9 through 3.12.
 
 ## Performance

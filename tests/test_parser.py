@@ -1,20 +1,9 @@
-import sys, os
+import sys, os, unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from squeal import astnodes as ast
 from squeal.errors import SquealError
 from squeal.parser import parse
-
-failures = 0
-
-def check(name, fn):
-    global failures
-    try:
-        fn()
-        print("ok  " + name)
-    except AssertionError as e:
-        failures += 1
-        print("FAIL %s: %s" % (name, e))
 
 def t(name, cond, detail=""):
     assert cond, detail or "condition was false"
@@ -116,15 +105,6 @@ def test_trailing_junk():
     except SquealError:
         pass
 
-test_select_star(); test_columns_alias(); test_distinct(); test_precedence()
-test_and_or(); test_not(); test_comparison_ops(); test_is_null(); test_like()
-test_in(); test_between(); test_group_having(); test_order_limit_offset()
-test_case(); test_func_args(); test_concat(); test_error_message(); test_trailing_junk()
-print()
-if failures:
-    print("%d FAILURE(S)" % failures)
-    sys.exit(1)
-print("all parser tests passed")
 
 
 def test_table_alias():
@@ -160,9 +140,6 @@ def test_join_requires_on():
     except SquealError:
         pass
 
-test_table_alias(); test_join_syntax(); test_join_chains_left_assoc()
-test_cross_join(); test_join_requires_on()
-print("join parser tests passed")
 
 
 def test_window_parse():
@@ -182,5 +159,21 @@ def test_window_order_only():
     q = parse("select rank() over (order by score) from people")
     t("order only", len(q.items[0][0].order_by) == 1)
 
-test_window_parse(); test_window_empty_over(); test_window_order_only()
-print("window parser tests passed")
+
+class ParserTests(unittest.TestCase):
+    """Every module-level parser check, collected by unittest."""
+
+
+def _wrap(fn):
+    def run(self):
+        fn()
+    return run
+
+
+for _name, _fn in sorted(list(globals().items())):
+    if _name.startswith("test_") and callable(_fn):
+        setattr(ParserTests, _name, _wrap(_fn))
+
+
+if __name__ == "__main__":
+    unittest.main()
