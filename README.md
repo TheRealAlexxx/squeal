@@ -1,17 +1,24 @@
 # squeal
 
-A tiny SQL engine for CSV files, written from scratch in pure Python.
-Zero dependencies, one installable package, and a real pipeline:
-lexer, recursive descent parser, expression evaluator, row-based
-executor, EXPLAIN, and a CLI/REPL.
+The SQL engine for CSV files that you can read in an afternoon.
+Written from scratch in pure Python with zero dependencies - no numpy,
+no pandas, nothing but the standard library: lexer, recursive descent
+parser, expression evaluator, row executor, EXPLAIN, CLI/REPL, each
+stage one small module.
 
-squeal exists to answer a question: what is the smallest honest SQL
-engine you can still learn something from? Every stage is a single
-small module you can read in one sitting.
+It is not fast, and it does not pretend to be: on the measured set it
+runs 7x to 121x slower than SQLite ([honest numbers](docs/benchmarks.md)).
+The point is the other direction. The whole engine fits in your head,
+the dialect is one documented page with its differences called out,
+and correctness is a published, checkable claim: 291 tests plus an
+80-record [sqllogictest corpus](tests/sqllogictest) verified against
+SQLite, with every deliberate difference pinned and explained.
+
+![Query the bundled CSVs in the browser playground, then read the plan](docs/demo.gif)
 
 **Try it in your browser: [squeal playground](https://therealalexxx.github.io/squeal/playground/)**
-- the whole engine compiled to WebAssembly, querying real CSVs,
-no install.
+- the whole engine compiled to WebAssembly, querying real CSVs, no
+install. Your files never leave the device.
 
 ## Install
 
@@ -89,7 +96,8 @@ elapsed: 0.2 ms
 - `WHERE` with full precedence: `or`, `and`, `not`, comparisons,
   `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] IN (...)`, `[NOT] BETWEEN`
 - Subqueries: `IN (SELECT ...)`, scalar subqueries, `EXISTS (SELECT ...)`,
-  uncorrelated only, results cached per statement
+  correlated or not, with result caching and probe sets to keep the
+  common cases cheap
 - `CREATE VIEW` / `DROP VIEW` for named queries in a session or script
 - `GROUP BY` and `HAVING`, with `count`, `sum`, `avg`, `min`, `max`,
   `group_concat`, all accepting `DISTINCT`
@@ -146,7 +154,8 @@ error: no such column: regoin (did you mean region?)
 - **`LIKE` is case sensitive.** `%` matches any run, `_` one character.
 - **No FROM** computes a single row: `select 6 * 7 as answer`.
 - **Strings are 1-based** in `substr`, like the standard says.
-- One query reads one file. No joins yet; see the roadmap.
+- `FROM` names CSV files, views and CTEs. No derived tables
+  (a parenthesized SELECT) yet.
 
 ## How it works inside
 
@@ -193,10 +202,13 @@ filter in about 30 ms, and a naive `IN (SELECT ...)` used to take
 
 ## Roadmap
 
-Tracked as GitHub issues. Joins, subqueries, and window functions
-landed in 0.2.0. The honest next steps: correlated subqueries,
-`CREATE VIEW`-style named queries in the REPL, and a columnar
-execution experiment behind a flag.
+Joins, correlated subqueries, window functions, views and the columnar
+experiment all landed; see the [changelog](CHANGELOG.md). What is
+deliberately missing today, roughly in order of usefulness:
+`lag()`/`lead()` and frame-clause windows, derived tables in `FROM`,
+`CAST`, and select aliases in `HAVING`. Each of those is currently a
+pinned, documented error in
+[tests/sqllogictest/pinned.test](tests/sqllogictest/pinned.test).
 
 ## License
 
