@@ -88,7 +88,12 @@ from a plain outer scan like `select * from x limit 5`. Rows come out
 in SQLite's queue order - anchor first, then each level in the order
 its parents were produced - so a capped scan returns the same prefix
 SQLite would. ORDER BY and LIMIT on the CTE itself apply to the
-accumulated rows after iteration. The recursive term computes new
+accumulated rows after iteration. EXPLAIN marks a self-referencing
+CTE "Cte <name> (recursive)"; EXPLAIN ANALYZE shows its materialized
+row count on that line but no per-stage counts underneath, because
+each stage ran once per iteration and one number would be fiction.
+An unused CTE's stages are likewise left unmeasured: it never ran.
+The recursive term computes new
 rows from one working table at a time, so it cannot use aggregate
 functions, window functions, GROUP BY, or HAVING - those have no
 honest meaning across levels and error (SQLite rejects them too);
