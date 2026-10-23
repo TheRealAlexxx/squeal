@@ -102,9 +102,11 @@ elapsed: 0.2 ms
 - Three output formats: `--format table|csv|json`
 - An experimental columnar engine for simple scans:
   `--engine columnar` evaluates WHERE over whole column lists instead
-  of row by row. It covers a narrow subset (single-table scans, simple
-  predicates, basic aggregates, one GROUP BY key) and falls back to the
-  row engine, with a note on stderr, for anything else. Measured in
+  of row by row. It covers a narrow subset (single-table CSV scans,
+  simple predicates, basic aggregates, one GROUP BY key). Anything
+  else - joins, views, ORDER BY, even `select 1 + 1` - runs on the row
+  engine with a note on stderr saying why, and EXPLAIN names the
+  engine a query would use. Measured in
   [docs/benchmarks.md](docs/benchmarks.md#columnar-experiment)
 - A REPL when you run `squeal` with no query, and script mode when you
   pipe a file of statements into it
@@ -162,7 +164,7 @@ PYTHONPATH=. python3 -m unittest discover -s tests
 The suite covers the lexer, parser, value semantics, executor, joins,
 subqueries, window functions, the playground bridge, the columnar
 engine's row-for-row parity with the row engine, and the CLI end to
-end: 207 tests. CI
+end: 210 tests. CI
 runs it on Python 3.9 through 3.12.
 
 ## Performance

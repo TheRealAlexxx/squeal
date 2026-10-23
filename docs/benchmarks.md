@@ -95,6 +95,15 @@ before timing anything, and `tests/test_columnar.py` holds the two
 engines row for row equal across the subset, including NULL three-valued
 logic, mixed-type comparisons, and NULL group keys.
 
+Independent review of this experiment (separate harness, not the repo's
+test collection): roughly 23,000 random subset and non-subset queries
+across six seeds compared type-sensitively against the row engine, plus
+42 handcrafted edge queries - zero mismatches, and hostile literals and
+column names never leaked into the generated code. A one-run repetition
+of the table above on the same 100k rows measured 2.1x, 3.6x, 3.7x,
+4.7x, and 1.2x - same direction, noisier. Nobody has measured 1M rows,
+memory use, or concurrency; treat all of this as evidence, not proof.
+
 What the experiment does not do: beats SQLite. The columnar filter +
 count above is still ~60x slower than SQLite's 0.6 ms on 10k rows.
 The win is real but it is a constant-factor win inside a pure-Python

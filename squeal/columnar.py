@@ -178,6 +178,14 @@ def _value_column(expr, table):
     raise _Bail()
 
 
+def covers(select, table):
+    """Would run() take this query? Probes on an empty copy, so no rows
+    are scanned: every subset guard is over shape and declared types."""
+    from .csvload import CsvTable
+    probe = CsvTable(table.columns, [], table.types, table.path)
+    return run(select, probe) is not None
+
+
 def run(select, table):
     """Execute the subset on whole columns, or return None to fall back."""
     try:

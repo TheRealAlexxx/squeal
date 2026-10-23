@@ -182,15 +182,55 @@ class CliFlagTests(unittest.TestCase):
                 self.assertEqual(expected.columns, got.columns, sql)
                 self.assertEqual(expected.rows, got.rows, sql)
 
-    def test_fallback_announces_itself(self):
+    def run_noting(self, session, sql):
         import contextlib
         import io
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            result = self.col.run("select name from people order by name")
-        self.assertIn("row engine", err.getvalue())
+            result = session.run(sql)
+        return result, err.getvalue()
+
+    def test_fallback_announces_itself(self):
+        result, note = self.run_noting(
+            self.col, "select name from people order by name")
+        self.assertIn("row engine", note)
         expected = self.row.run("select name from people order by name")
         self.assertEqual(expected.rows, result.rows)
+
+    def test_every_fallback_announces_itself(self):
+        # QA review: no query may silently run row under --engine columnar
+        cases = [
+            "select 1 + 1",
+            "select name from people order by name",
+            "select distinct city from people",
+            "select a.name from people a join people b on a.name = b.name",
+            "select city, count(*) from people group by city "
+            "having count(*) > 1",
+        ]
+        self.col.run("create view londoners as "
+                     "select name from people where city = 'London'")
+        cases.append("select name from londoners")
+        for sql in cases:
+            with self.subTest(sql=sql):
+                _, note = self.run_noting(self.col, sql)
+                self.assertIn("row engine", note, "silent fallback: " + sql)
+
+    def test_subset_queries_stay_quiet(self):
+        _, note = self.run_noting(
+            self.col, "select city, count(*) from people group by city")
+        self.assertEqual("", note)
+
+    def test_explain_names_the_engine(self):
+        plan = self.col.run("explain select name from people where age > 30")
+        self.assertTrue(plan.startswith("engine: columnar\n"), plan)
+        plan = self.col.run("explain select name from people order by name")
+        self.assertTrue(plan.startswith("engine: row"), plan)
+        plan = self.col.run("explain select 1 + 1")
+        self.assertTrue(plan.startswith("engine: row"), plan)
+        analyzed = self.col.run(
+            "explain analyze select name from people where age > 30")
+        self.assertIn("EXPLAIN ANALYZE always measures the row pipeline",
+                      analyzed)
 
 
 if __name__ == "__main__":

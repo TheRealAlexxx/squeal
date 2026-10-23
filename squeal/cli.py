@@ -77,6 +77,9 @@ class Session:
         if select.explain:
             for ref in table_refs(select.source):
                 self.resolve(ref.name)  # fail early on a bad path
+            prefix = ""
+            if self.engine == "columnar" and not select.analyze:
+                prefix = "engine: " + self._planned_engine(select) + "\n"
             if select.analyze:
                 import time
                 from .explain import render_analyzed
@@ -85,26 +88,55 @@ class Session:
                 start = time.perf_counter()
                 execute(select, self.resolve, stats)
                 elapsed = (time.perf_counter() - start) * 1000
-                return render_analyzed(select, self.resolve, stats, elapsed)
-            return render_plan(select, self.resolve)
+                body = render_analyzed(select, self.resolve, stats, elapsed)
+                if self.engine == "columnar":
+                    body = ("engine: row (EXPLAIN ANALYZE always measures "
+                            "the row pipeline)\n" + body)
+                return body
+            return prefix + render_plan(select, self.resolve)
         if select.source is None:
             # no FROM: one row computed from thin air
             from .csvload import CsvTable
+            if self.engine == "columnar":
+                print("columnar: query outside the subset, "
+                      "using the row engine", file=sys.stderr)
             return execute(select, CsvTable([], [()], [], "<memory>"))
         if self.engine == "columnar":
-            from . import astnodes as ast
-            from . import columnar
-            if isinstance(select.source, ast.TableRef):
-                table = self.resolve(select.source.name)
-                # views come back all-text typed; the columnar compiler
-                # trusts declared types, so only real CSVs qualify
-                if table.path.endswith(".csv"):
-                    result = columnar.run(select, table)
-                    if result is not None:
-                        return result
-                    print("columnar: query outside the subset, "
-                          "using the row engine", file=sys.stderr)
+            note = self._columnar_note(select)
+            if note is not None:
+                print(note, file=sys.stderr)
+            else:
+                from . import columnar
+                result = columnar.run(select, self.resolve(select.source.name))
+                if result is not None:
+                    return result
+                print("columnar: query outside the subset, "
+                      "using the row engine", file=sys.stderr)
         return execute(select, self.resolve)
+
+    def _columnar_note(self, select):
+        """Why the columnar engine will not take this query, or None."""
+        from . import astnodes as ast
+        if not isinstance(select.source, ast.TableRef):
+            return "columnar: joins are outside the subset, using the row engine"
+        if select.source.name in self.views:
+            return "columnar: views are outside the subset, using the row engine"
+        table = self.resolve(select.source.name)
+        # views come back all-text typed; the columnar compiler trusts
+        # declared types, so only real CSVs qualify
+        if not table.path.endswith(".csv"):
+            return "columnar: source is not a CSV, using the row engine"
+        return None
+
+    def _planned_engine(self, select):
+        """Which engine a plain run of this query would use."""
+        note = self._columnar_note(select)
+        if note is not None or select.source is None:
+            return "row (outside the columnar subset)"
+        from . import columnar
+        if columnar.covers(select, self.resolve(select.source.name)):
+            return "columnar"
+        return "row (outside the columnar subset)"
 
 
 def table_refs(node):
