@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Compound selects: UNION, UNION ALL, INTERSECT, EXCEPT, with SQLite's
+  equal-precedence left-to-right rule
+- WITH clauses: named statement-scoped subqueries, materialized on
+  first use, shadowing tables and views
+- WITH RECURSIVE: working-table iteration; UNION dedupe terminates
+  cycles; 100,000-row guard; early termination under an unordered
+  LIMIT on the CTE or a plain outer scan
+- Aggregates, window functions, GROUP BY and HAVING are rejected in
+  recursive terms, matching SQLite; DISTINCT stays allowed
+- Fix: FROM-less queries can use subqueries that read real tables
+  (scalar, EXISTS, NOT EXISTS); the CLI's single-row shim used to
+  swallow every table lookup inside them
+- EXPLAIN lists each WITH pipeline and marks self-referencing CTEs
+  "Cte <name> (recursive)"
+
 ## 0.2.0 - 2026-10-22
 
 - INNER, LEFT [OUTER] and CROSS JOIN with ON conditions, table aliases
