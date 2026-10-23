@@ -6,7 +6,7 @@ standard, the difference is called out.
 ## Statements
 
 ```
-[WITH name [(col, ...)] AS (select), ...]
+[WITH [RECURSIVE] name [(col, ...)] AS (select), ...]
 SELECT [DISTINCT] select_item [, ...]
   [FROM source]
   [WHERE expr]
