@@ -148,3 +148,62 @@ class ReplMetaCommandTests(unittest.TestCase):
         self.assertIn("people.csv  (6 rows)", out.getvalue())
         self.assertIn("londoners", out.getvalue())
 
+
+
+class FileArgumentHintTests(unittest.TestCase):
+    def test_file_path_argument_gets_a_hint(self):
+        import io
+        import tempfile
+        from contextlib import redirect_stderr
+        from squeal.cli import main
+        path = os.path.join(tempfile.mkdtemp(), "data.csv")
+        with open(path, "w") as fh:
+            fh.write("a,b\n1,2\n")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code = main([path])
+        self.assertEqual(code, 2)
+        self.assertIn("is a file, not a query", err.getvalue())
+        self.assertIn("select * from", err.getvalue())
+
+    def test_a_real_query_still_runs_when_no_file_matches(self):
+        import io
+        from contextlib import redirect_stdout
+        from squeal.cli import main
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = main(["select 1 + 1"])
+        self.assertEqual(code, 0)
+        self.assertIn("2", out.getvalue())
+
+
+class PipedScriptTests(unittest.TestCase):
+    def run_script(self, text):
+        import io
+        from contextlib import redirect_stdout
+        from squeal.cli import main
+        stdin = sys.stdin
+        sys.stdin = io.StringIO(text)
+        out = io.StringIO()
+        try:
+            with redirect_stdout(out):
+                code = main([])
+        finally:
+            sys.stdin = stdin
+        return code, out.getvalue()
+
+    def test_metacommand_lines_are_skipped(self):
+        code, out = self.run_script(".tables\n.quit\nselect 1;\n")
+        self.assertEqual(code, 0)
+        self.assertIn("1", out)
+
+    def test_dot_prefixed_sql_survives(self):
+        code, out = self.run_script("select .5;\n")
+        self.assertEqual(code, 0)
+        self.assertIn("0.5", out)
+
+    def test_repl_help(self):
+        # .help is a REPL nicety; the piped path just skips it
+        code, out = self.run_script(".help\nselect 2;\n")
+        self.assertEqual(code, 0)
+        self.assertIn("2", out)

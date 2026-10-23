@@ -129,6 +129,10 @@ def repl(session, fmt):
         if not buf and stripped in (".tables", ".views"):
             _show_known(session, stripped)
             continue
+        if not buf and stripped == ".help":
+            print("commands: .tables  .views  .help  .quit - "
+                  "end statements with ;")
+            continue
         buf += line + "\n"
         if not stripped.endswith(";"):
             continue
@@ -173,8 +177,11 @@ def main(argv=None):
     session = Session()
     if args.query is None and not sys.stdin.isatty():
         # piped stdin is a script: run every statement in order
+        # skip pasted REPL metacommands, nothing else: a SQL line can
+        # legitimately start with a dot (e.g. the literal .5)
+        meta = (".quit", ".exit", "\q", ".tables", ".views", ".help")
         script = "\n".join(line for line in sys.stdin.read().splitlines()
-                           if not line.strip().startswith("."))
+                           if line.strip() not in meta)
         try:
             statements = parse_many(script)
         except SquealError as e:
@@ -195,6 +202,10 @@ def main(argv=None):
     if query is None:
         repl(session, args.format)
         return 0
+    if os.path.exists(query):
+        print("error: %s is a file, not a query - did you mean:" % query, file=sys.stderr)
+        print('  squeal "select * from \'%s\'"' % query, file=sys.stderr)
+        return 2
     try:
         print(run_query(session, query, args.format))
     except SquealError as e:
