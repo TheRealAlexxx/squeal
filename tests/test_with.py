@@ -137,6 +137,40 @@ class WithTests(unittest.TestCase):
                 "x.i = y.i")
         self.assertIn("row guard", str(cm.exception))
 
+    def test_explain_cte_definition_is_a_section_not_a_stage(self):
+        # the WITH definition is a labeled side-pipeline at column 0,
+        # not a stage nested under the main pipeline's last stage
+        from squeal.cli import Session
+        out = Session().run(
+            "explain with t as (select 1 as i) "
+            "select i from t union all select i from t")
+        self.assertEqual(out, """\
+Scan  t
+-> Project  i
+Union All
+-> Scan  t
+  -> Project  i
+Cte  t
+-> Compute  (no table)
+  -> Project  1""")
+
+    def test_explain_nested_ctes_render_as_sibling_sections(self):
+        # declaration order, each definition self-contained: u's body
+        # visibly scans t, and nothing nests u inside t's pipeline
+        from squeal.cli import Session
+        out = Session().run(
+            "explain with t as (select 1 as i), u as (select i from t) "
+            "select i from u")
+        self.assertEqual(out, """\
+Scan  u
+-> Project  i
+Cte  t
+-> Compute  (no table)
+  -> Project  1
+Cte  u
+-> Scan  t
+  -> Project  i""")
+
     def test_explain_lists_cte_pipeline(self):
         from squeal.cli import Session
         out = Session().run(

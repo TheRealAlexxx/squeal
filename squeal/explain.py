@@ -51,18 +51,20 @@ def _compound_plan(select, resolve=None):
     lines = plan(_core_of(select), resolve)
     for op, core in select.compounds:
         lines.append((0, COMPOUND_LABELS[op]))
-        lines.extend(plan(core, resolve))
+        lines.extend((d + 1, t) for d, t in plan(core, resolve))
+    tail = 0
     if select.order_by:
         keys = ", ".join(to_sql(e) + (" DESC" if d else "")
                          for e, d in select.order_by)
         lines.append((0, "Sort  keys: " + keys))
+        tail = 1
     if select.limit is not None or select.offset is not None:
         bits = []
         if select.limit is not None:
             bits.append("limit %d" % select.limit)
         if select.offset:
             bits.append("offset %d" % select.offset)
-        lines.append((0, "Limit " + " ".join(bits)))
+        lines.append((tail, "Limit " + " ".join(bits)))
     return lines
 
 
@@ -88,7 +90,7 @@ def plan(select, resolve=None):
                        for n in cte.select.walk())
         label = "Cte  %s%s" % (cte.name, " (recursive)" if self_ref else "")
         lines.append((0, label))
-        lines.extend(plan(cte.select, resolve))
+        lines.extend((d + 1, t) for d, t in plan(cte.select, resolve))
     return lines
 
 
@@ -139,7 +141,7 @@ def _plain_plan(select, resolve=None):
     else:
         stage("Compute  (no table)")
     lines.reverse()
-    return lines
+    return [(i, text) for i, (_, text) in enumerate(lines)]
 
 
 # plan() used to end here; _plain_plan is the original body renamed so
@@ -214,7 +216,8 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
             cur_core = next(core_stats, cur_core)
         elif text.startswith("Limit"):
             note = "%d rows" % stats.get("rows", 0)
-        prefix = text if i == 0 else "  " * (i - 1) + "-> " + text
+        depth = lines[i][0]
+        prefix = text if depth == 0 else "  " * (depth - 1) + "-> " + text
         out.append(prefix + ("   -- " + note if note else ""))
     out.append("elapsed: %.1f ms" % elapsed_ms)
     return "\n".join(out)
@@ -224,6 +227,6 @@ def render(select, resolve=None):
     # the pipeline is a strict chain: position in the list is the depth
     lines = plan(select, resolve)
     out = []
-    for i, (_, text) in enumerate(lines):
-        out.append(text if i == 0 else "  " * (i - 1) + "-> " + text)
+    for depth, text in lines:
+        out.append(text if depth == 0 else "  " * (depth - 1) + "-> " + text)
     return "\n".join(out)

@@ -141,5 +141,23 @@ class CompoundTests(unittest.TestCase):
         self.assertIn("-- 2 rows", out)
 
 
+    def test_explain_compound_arms_and_statement_tail(self):
+        # the op divides pipelines at column 0 with the arm it combines
+        # chained beneath; statement ORDER BY/LIMIT dedent back out so
+        # they read as the tail of the whole statement
+        from squeal.cli import Session
+        out = Session().run(
+            "explain select 1 as i union all select 2 as i "
+            "order by i limit 2")
+        self.assertEqual(out, """\
+Compute  (no table)
+-> Project  1
+Union All
+-> Compute  (no table)
+  -> Project  2
+Sort  keys: i
+-> Limit limit 2""")
+
+
 if __name__ == "__main__":
     unittest.main()
