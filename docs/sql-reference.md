@@ -92,3 +92,7 @@ row set and cannot mix with GROUP BY.
   cases cheap.
 - A bare column in a grouped query reads the group's first row, the
   SQLite convention.
+- There is no CAST. Types come from the CSV, so `cast(age as text)`
+  fails at parse time with a pointer at the `as`. If you need a number
+  as text, export and convert, or use || with an empty string:
+  `select age || '' from people`.
