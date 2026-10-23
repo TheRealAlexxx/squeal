@@ -6,6 +6,7 @@ into JavaScript. The Node smoke test (playground/test_bridge.mjs) runs
 this exact file the same way the browser does.
 """
 
+import base64
 import json
 import os
 import sys
@@ -23,13 +24,36 @@ os.makedirs("/data", exist_ok=True)
 
 
 def mount_csv(name, text):
-    """Load CSV text under a table name and report what is mounted."""
+    """Load trusted CSV text (the bundled samples) under a table name."""
     path = "/data/" + name + ".csv"
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text)
-    SESSION.tables[name] = load(path)
+    return _mount(name, path)
+
+
+def mount_csv_bytes(name, data_b64):
+    """Load an uploaded CSV, keeping its raw bytes.
+
+    Uploads cross as base64 so the original encoding reaches the
+    loader: a UTF-16 file fails with the loader's clean error instead
+    of being silently re-decoded by JavaScript.
+    """
+    path = "/data/" + name + ".csv"
+    with open(path, "wb") as fh:
+        fh.write(base64.b64decode(data_b64))
+    return _mount(name, path)
+
+
+def _mount(name, path):
+    try:
+        table = load(path)
+    except SquealError as exc:
+        return json.dumps({"ok": False, "error": exc.message})
+    SESSION.tables[name] = table
     SESSION.views.pop(name, None)
-    return describe()
+    out = json.loads(describe())
+    out["ok"] = True
+    return json.dumps(out)
 
 
 def drop_table(name):

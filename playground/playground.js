@@ -109,11 +109,32 @@ async function mountText(name, text) {
   return bridgeCall("bridge.mount_csv(" + pyString(name) + ", " + pyString(text) + ")");
 }
 
+async function mountBytes(name, buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  return bridgeCall("bridge.mount_csv_bytes(" + pyString(name) + ", " + pyString(btoa(binary)) + ")");
+}
+
+function showMountOutcome(name, outcome) {
+  if (!outcome.ok) {
+    $("#error").textContent = "error: " + outcome.error;
+    $("#error").hidden = false;
+    setStatus("could not load " + name);
+    return false;
+  }
+  renderTables(outcome);
+  return true;
+}
+
 async function mountDataset(dataset, silent) {
   for (const [name, path] of Object.entries(dataset.files)) {
     const response = await fetch(path);
     if (!response.ok) throw new Error("cannot load " + path);
-    await mountText(name, await response.text());
+    const outcome = await mountText(name, await response.text());
+    if (!outcome.ok) throw new Error("bundled sample " + path + ": " + outcome.error);
   }
   const description = await bridgeCall("bridge.describe()");
   renderTables(description);
@@ -238,10 +259,10 @@ async function mountFiles(fileList) {
   for (const file of fileList) {
     if (!/\.csv$/i.test(file.name)) { setStatus("skipped " + file.name + ": not a .csv"); continue; }
     setStatus("loading " + file.name + "…");
-    const text = await file.text();
-    const description = await mountText(tableNameFor(file.name), text);
-    renderTables(description);
-    setStatus(file.name + " mounted as table " + tableNameFor(file.name));
+    const outcome = await mountBytes(tableNameFor(file.name), await file.arrayBuffer());
+    if (showMountOutcome(file.name, outcome)) {
+      setStatus(file.name + " mounted as table " + tableNameFor(file.name));
+    }
   }
 }
 
@@ -286,6 +307,14 @@ async function autotest() {
 
     r = await bridgeCall("bridge.run_sql('explain select * from people')");
     check("explain message", r.ok && typeof r.message === "string" && r.message.length > 0, r.message);
+
+    const ragged = btoa("a,b\n1,2\n3,4,5\n");
+    r = await bridgeCall("bridge.mount_csv_bytes('ragged', '" + ragged + "')");
+    check("ragged upload is a clean error", !r.ok && r.error.indexOf("row 3") >= 0, r.error);
+
+    const utf16 = btoa("\xff\xfea\x00,\x00b\x00");
+    r = await bridgeCall("bridge.mount_csv_bytes('utf16', '" + utf16 + "')");
+    check("utf-16 upload is a clean error", !r.ok && r.error.indexOf("not UTF-8") >= 0, r.error);
 
     const before = (await bridgeCall("bridge.describe()")).tables.length;
     await bridgeCall("bridge.drop_table('sensors')");
