@@ -14,14 +14,18 @@ PYTHONPATH=. python3 benchmarks/run.py --rows 10000
 
 A 1 GB RAM container, CPython 3.10. Your machine will differ.
 
-| query | median of 3 |
-| --- | --- |
-| filter + count | 29 ms |
-| group by + having | 33 ms |
-| hash join + group | 78 ms |
-| window: row_number | 292 ms |
-| order by + limit | 208 ms |
-| subquery in | 52 ms |
+| query | squeal | SQLite | slower by |
+| --- | --- | --- | --- |
+| filter + count | 28 ms | 0.5 ms | 52x |
+| group by + having | 33 ms | 3.1 ms | 11x |
+| hash join + group | 76 ms | 4.9 ms | 16x |
+| window: row_number | 134 ms | 15.0 ms | 9x |
+| order by + limit | 111 ms | 0.7 ms | 161x |
+| subquery in | 29 ms | 1.3 ms | 22x |
+
+The SQLite column comes from `benchmarks/run.py --compare-sqlite`,
+which loads the same generated CSVs into an in-memory SQLite with the
+same column types and times the identical query text.
 
 (Numbers wobble run to run on a shared container; treat them as
 orders of magnitude, not precise timings.)
@@ -40,5 +44,9 @@ found by measuring:
    filter over the same rows.
 
 The executor is row-based and interpreted, in Python, with no
-prefetching or vectorization. It is fast enough to be useful on real
+prefetching or vectorization. SQLite is C with decades of tuning, so
+the 9-161x gap above is the honest cost of that trade. Where the gap
+is smallest (window functions, grouping) squeal is doing nearly the
+same work SQLite is; where it is largest (sorting, scanning) the
+interpreter overhead dominates. It is fast enough to be useful on real
 CSVs and slow enough to keep the code honest. That trade is deliberate.

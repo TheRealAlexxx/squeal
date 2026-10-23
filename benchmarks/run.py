@@ -1,16 +1,21 @@
 """Benchmarks: generate a synthetic dataset, time real queries, print a table.
 
-    PYTHONPATH=. python3 benchmarks/run.py [--rows N]
+    PYTHONPATH=. python3 benchmarks/run.py [--rows N] [--compare-sqlite]
 
 Numbers land in docs/benchmarks.md. Everything is timed wall-clock with
 perf_counter, median of three runs, on whatever machine runs it. No
 claim here transfers to your machine; run it yourself.
+
+--compare-sqlite runs the same queries over the same rows in SQLite
+(Python's built-in sqlite3) and prints both timings side by side. SQLite
+is the reference engine; the gap says honestly where squeal stands.
 """
 
 import argparse
 import csv
 import os
 import random
+import sqlite3
 import statistics
 import sys
 import tempfile
@@ -46,17 +51,41 @@ def generate(rows, directory):
 
 
 QUERIES = [
-    ("filter + count", "select count(*) from '{orders}' where unit_price > 500"),
-    ("group by + having", "select region, count(*), avg(unit_price) from '{orders}' "
+    ("filter + count", "select count(*) from {orders} where unit_price > 500"),
+    ("group by + having", "select region, count(*), avg(unit_price) from {orders} "
                           "group by region having count(*) > 10"),
-    ("hash join + group", "select c.region, sum(o.quantity) from '{orders}' o "
-                          "join '{customers}' c on o.customer_id = c.id group by c.region"),
+    ("hash join + group", "select c.region, sum(o.quantity) from {orders} o "
+                          "join {customers} c on o.customer_id = c.id group by c.region"),
     ("window: row_number", "select id, row_number() over (partition by region "
-                           "order by unit_price desc) from '{orders}'"),
-    ("order by + limit", "select id from '{orders}' order by unit_price desc limit 20"),
-    ("subquery in", "select count(*) from '{orders}' where customer_id in "
-                    "(select id from '{customers}' where region = 'eu-north')"),
+                           "order by unit_price desc) from {orders}"),
+    ("order by + limit", "select id from {orders} order by unit_price desc limit 20"),
+    ("subquery in", "select count(*) from {orders} where customer_id in "
+                    "(select id from {customers} where region = 'eu-north')"),
 ]
+
+
+def build_sqlite(orders, customers):
+    """Load the generated CSVs into an in-memory SQLite with the same types."""
+    con = sqlite3.connect(":memory:")
+    kinds = {int: "INTEGER", float: "REAL", str: "TEXT"}
+    for path in (orders, customers):
+        table = load(path)
+        name = os.path.basename(path)[:-4]
+        cols = ", ".join("%s %s" % (c, kinds[t])
+                         for c, t in zip(table.columns, table.types))
+        con.execute("create table %s (%s)" % (name, cols))
+        con.executemany("insert into %s values (%s)"
+                        % (name, ",".join("?" * len(table.columns))), table.rows)
+    return con
+
+
+def bench_sqlite(sql, con, repeat=3):
+    samples = []
+    for _ in range(repeat):
+        start = time.perf_counter()
+        con.execute(sql).fetchall()
+        samples.append((time.perf_counter() - start) * 1000)
+    return statistics.median(samples)
 
 
 def bench(sql, resolver, repeat=3):
@@ -71,6 +100,8 @@ def bench(sql, resolver, repeat=3):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rows", type=int, default=100_000)
+    parser.add_argument("--compare-sqlite", action="store_true",
+                        help="time the same queries on SQLite next to squeal")
     args = parser.parse_args()
 
     directory = tempfile.mkdtemp(prefix="squeal-bench-")
@@ -84,12 +115,26 @@ def main():
             cache[name] = load(name)
         return cache[name]
 
-    print("| query | median of 3 |")
-    print("| --- | --- |")
+    names = {"orders": os.path.basename(orders)[:-4],
+             "customers": os.path.basename(customers)[:-4]}
+    con = build_sqlite(orders, customers) if args.compare_sqlite else None
+
+    if con:
+        print("| query | squeal | SQLite | slower by |")
+        print("| --- | --- | --- | --- |")
+    else:
+        print("| query | median of 3 |")
+        print("| --- | --- |")
     for label, sql in QUERIES:
-        sql = sql.format(orders=orders, customers=customers)
-        ms = bench(sql, resolver)
-        print("| %s | %.0f ms |" % (label, ms))
+        squeal_sql = sql.format(orders="'%s'" % orders,
+                                customers="'%s'" % customers)
+        ms = bench(squeal_sql, resolver)
+        if con:
+            sqlite_ms = bench_sqlite(sql.format(**names), con)
+            print("| %s | %.0f ms | %.1f ms | %.0fx |"
+                  % (label, ms, sqlite_ms, ms / max(sqlite_ms, 0.001)))
+        else:
+            print("| %s | %.0f ms |" % (label, ms))
 
 
 if __name__ == "__main__":
