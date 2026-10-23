@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-23
 
 - sqllogictest-subset corpus in tests/sqllogictest: 80 records,
   feature files verified against the SQLite oracle at generation time,
