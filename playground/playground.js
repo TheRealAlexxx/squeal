@@ -11,7 +11,8 @@ const PYODIDE_INDEX = "https://cdn.jsdelivr.net/npm/pyodide@314.0.7/";
 // Every engine module, loaded verbatim. tests/test_playground.py fails
 // if this list drifts from squeal/*.py on disk.
 const ENGINE_FILES = [
-  "__init__.py", "astnodes.py", "cli.py", "csvload.py", "errors.py",
+  "__init__.py", "astnodes.py", "cli.py", "columnar.py", "csvload.py",
+  "errors.py",
   "executor.py", "explain.py", "lexer.py", "parser.py", "render.py",
   "schema.py", "unparse.py", "values.py",
 ];

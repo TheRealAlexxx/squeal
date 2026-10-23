@@ -63,3 +63,39 @@ is smallest (window functions, grouping) squeal is doing nearly the
 same work SQLite is; where it is largest (sorting, scanning) the
 interpreter overhead dominates. It is fast enough to be useful on real
 CSVs and slow enough to keep the code honest. That trade is deliberate.
+
+## Columnar experiment
+
+Issue #4 asked what whole-column evaluation buys for the simple scans
+that dominate real CSV poking. `squeal/columnar.py` compiles a simple
+WHERE clause to one Python list comprehension over column lists and
+aggregates with index lists per group. Everything outside the subset
+(joins, ORDER BY, DISTINCT, windows, subqueries, HAVING, scalar
+expressions in the SELECT list) bails to the row engine.
+
+Run it yourself:
+
+```
+PYTHONPATH=. python3 benchmarks/columnar.py --rows 100000
+```
+
+Numbers from the same sandbox, 100k orders, median of three:
+
+| query | row engine | columnar | speedup |
+| --- | --- | --- | --- |
+| filter + count | 111 ms | 40 ms | 2.7x |
+| filter + project | 294 ms | 88 ms | 3.4x |
+| aggregate | 236 ms | 59 ms | 4.0x |
+| group by | 451 ms | 71 ms | 6.4x |
+| group by + filter | 172 ms | 84 ms | 2.0x |
+
+The issue asks for a 1M-row CSV; the 1 GB sandbox crawls at that size,
+so these ran at 100k. `benchmarks/columnar.py` checks result parity
+before timing anything, and `tests/test_columnar.py` holds the two
+engines row for row equal across the subset, including NULL three-valued
+logic, mixed-type comparisons, and NULL group keys.
+
+What the experiment does not do: beats SQLite. The columnar filter +
+count above is still ~60x slower than SQLite's 0.6 ms on 10k rows.
+The win is real but it is a constant-factor win inside a pure-Python
+interpreter, not a new league.
