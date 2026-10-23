@@ -160,6 +160,8 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
     # over to the next core's counts
     core_stats = iter(stats.get("core_stats", [stats]))
     cur_core = next(core_stats)
+    body_cores = None  # per-core stats of the CTE section being rendered
+    body_ops = None
     for i, (_, text) in enumerate(lines):
         note = ""
         if i in suppress:
@@ -200,6 +202,7 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
             # never ran at all. Both render their stages without notes;
             # the Cte line's materialized row count carries the fact.
             cte_stats = stats.get("cte_stats", {})
+            body_cores = body_ops = None
             if recursive_cte or name not in cte_stats:
                 cur_core = {}
                 for j in range(i + 1, len(lines)):
@@ -207,13 +210,23 @@ def render_analyzed(select, resolve, stats, elapsed_ms):
                     if nxt.startswith("Cte  "):
                         break
                     suppress.add(j)
+            elif "core_stats" in cte_stats[name]:
+                # a compound CTE body keeps each core's counts nested;
+                # consume them across this section like the top level's
+                body_cores = iter(cte_stats[name]["core_stats"])
+                body_ops = iter(cte_stats[name].get("compound_ops", []))
+                cur_core = next(body_cores, {})
             else:
                 cur_core = cte_stats[name]
         elif text.startswith(("Union", "Intersect", "Except")):
-            count = next(compound_counts, None)
+            if body_cores is not None:
+                count = next(body_ops, None)
+                cur_core = next(body_cores, cur_core)
+            else:
+                count = next(compound_counts, None)
+                cur_core = next(core_stats, cur_core)
             if count is not None:
                 note = "%d rows" % count
-            cur_core = next(core_stats, cur_core)
         elif text.startswith("Limit"):
             note = "%d rows" % stats.get("rows", 0)
         depth = lines[i][0]

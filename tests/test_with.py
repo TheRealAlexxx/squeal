@@ -171,6 +171,33 @@ Cte  u
 -> Scan  t
   -> Project  i""")
 
+    def test_analyze_measures_each_core_of_a_compound_cte_body(self):
+        # a compound CTE body keeps each core's counts nested in its own
+        # stats; the renderer used to read the body's top level and show
+        # "Project ... -- 0 rows" for every core (independent QA repro)
+        from squeal.cli import Session
+        out = Session().run(
+            "explain analyze with v as (select 1 as i union all "
+            "select 2 as i) select i from v")
+        self.assertIn("Cte  v   -- 2 rows", out)
+        self.assertIn("Project  1   -- 1 rows", out)
+        self.assertIn("Union All   -- 2 rows", out)
+        self.assertIn("Project  2   -- 1 rows", out)
+        self.assertNotIn("-- 0 rows", out)
+
+    def test_analyze_compound_cte_body_under_a_limit(self):
+        from squeal.cli import Session
+        fixture = os.path.join(FIXTURES, "people.csv")
+        out = Session().run(
+            "explain analyze with v as (select name from '%s' union all "
+            "select name from '%s') select name from v limit 3"
+            % (fixture, fixture))
+        self.assertIn("Cte  v   -- 12 rows", out)
+        self.assertIn("Union All   -- 12 rows", out)
+        self.assertEqual(out.count("Project  name   -- 6 rows"), 2)
+        self.assertIn("Limit limit 3   -- 3 rows", out)
+        self.assertNotIn("-- 0 rows", out)
+
     def test_explain_lists_cte_pipeline(self):
         from squeal.cli import Session
         out = Session().run(
