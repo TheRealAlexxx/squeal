@@ -59,6 +59,42 @@ const MAX_RENDERED_ROWS = 1000;
 const $ = (sel) => document.querySelector(sel);
 let pyodide = null;
 let bootedAt = 0;
+let currentDataset = DATASETS[0];
+
+function b64encode(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  return btoa(binary);
+}
+
+function b64decode(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function readShareHash() {
+  const match = location.hash.match(/q=([A-Za-z0-9+/=]+)/);
+  if (!match) return null;
+  try {
+    const sql = b64decode(match[1]);
+    const d = location.hash.match(/[?&]d=([a-z0-9-]+)/) ||
+              location.hash.match(/&d=([a-z0-9-]+)/);
+    return { sql, dataset: d ? d[1] : null };
+  } catch (exc) {
+    return null;  // a mangled hash just starts the default view
+  }
+}
+
+function writeShareHash(sql) {
+  let hash = "#q=" + b64encode(sql);
+  if (currentDataset) hash += "&d=" + currentDataset.id;
+  history.replaceState(null, "", hash);
+}
 
 function bootStep(text, fraction) {
   $("#boot-status").textContent = text;
@@ -87,17 +123,24 @@ async function boot() {
     "import sys\nsys.path.insert(0, '/')\nimport bridge\nbridge.describe()"));
 
   bootStep("mounting sample data…", 0.9);
-  await mountDataset(DATASETS[0], true);
+  const shared = readShareHash();
+  if (shared && shared.dataset) {
+    const found = DATASETS.find((d) => d.id === shared.dataset);
+    if (found) currentDataset = found;
+  }
+  await mountDataset(currentDataset, true);
 
   bootedAt = performance.now() - t0;
   $("#boot").classList.add("done");
   setTimeout(() => { const el = $("#boot"); if (el) el.remove(); }, 500);
   $("#run").disabled = false;
+  $("#plan").disabled = false;
   document.querySelectorAll("#datasets button.dataset").forEach((b) => { b.disabled = false; });
   setStatus("squeal " + description.version + " ready in " +
             (bootedAt / 1000).toFixed(1) + "s - the engine is running in this tab");
-  $("#sql").value = DATASETS[0].queries[0][1];
-  renderChips(DATASETS[0]);
+  $("#sql").value = shared ? shared.sql : currentDataset.queries[0][1];
+  renderChips(currentDataset);
+  if (!wantsAutotest) runQuery();  // the demo query is the landing
 }
 
 async function bridgeCall(call) {
@@ -121,15 +164,48 @@ async function mountBytes(name, buffer) {
   return bridgeCall("bridge.mount_csv_bytes(" + pyString(name) + ", " + pyString(btoa(binary)) + ")");
 }
 
-function showError(text) {
+function showError(text, pos) {
   $("#error").textContent = text;
   $("#error").hidden = false;
+  underlineError(pos);
   $("#error").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function clearUnderline() { $("#editor-backdrop").textContent = ""; }
+
+function underlineError(pos) {
+  clearUnderline();
+  if (!pos) return;
+  const text = $("#sql").value;
+  const lines = text.split("\n");
+  const lineNo = pos[0], col = pos[1];
+  if (lineNo - 1 >= lines.length) return;
+  let start = 0;
+  for (let i = 0; i < lineNo - 1; i++) start += lines[i].length + 1;
+  start += col - 1;
+  if (start >= text.length) return;
+  let end = start;
+  while (end < text.length && /[A-Za-z0-9_]/.test(text[end])) end++;
+  if (end === start) end = start + 1;
+  $("#editor-backdrop").innerHTML =
+    escapeHtml(text.slice(0, start)) +
+    "<span class='errmark'>" + escapeHtml(text.slice(start, end)) + "</span>" +
+    escapeHtml(text.slice(end)) + "\n";
+  syncBackdrop();
+}
+
+function syncBackdrop() {
+  const backdrop = $("#editor-backdrop");
+  backdrop.scrollTop = $("#sql").scrollTop;
+  backdrop.scrollLeft = $("#sql").scrollLeft;
 }
 
 function showMountOutcome(name, outcome) {
   if (!outcome.ok) {
     showError("error: " + outcome.error);
+    // the failed file changed nothing; stale results would pretend otherwise
+    $("#results").innerHTML = "";
+    $("#plan-output").textContent = "";
     setStatus("could not load " + name);
     return false;
   }
@@ -181,8 +257,10 @@ function renderDatasets() {
                        escapeHtml(dataset.blurb) + "</small>";
     button.addEventListener("click", async () => {
       button.disabled = true;
-      try { await mountDataset(dataset, false); }
-      finally { button.disabled = false; }
+      try {
+        await mountDataset(dataset, false);
+        currentDataset = dataset;
+      } finally { button.disabled = false; }
     });
     host.appendChild(button);
   }
@@ -222,11 +300,12 @@ async function runQuery() {
   }
   $("#run").disabled = false;
   if (!outcome.ok) {
-    showError(outcome.rendered || ("error: " + outcome.error));
+    showError(outcome.rendered || ("error: " + outcome.error), outcome.pos);
     $("#results").innerHTML = "";
     setStatus("query failed");
     return;
   }
+  writeShareHash(sql);
   if (outcome.message) {
     $("#message").textContent = outcome.message;
     $("#message").hidden = false;
@@ -240,9 +319,10 @@ async function runQuery() {
 function renderResults(outcome) {
   const total = outcome.rows.length;
   const shown = Math.min(total, MAX_RENDERED_ROWS);
-  const head = "<tr>" + outcome.columns.map((c) => "<th>" + escapeHtml(c) + "</th>").join("") + "</tr>";
-  const body = outcome.rows.slice(0, shown).map((row) =>
-    "<tr>" + row.map((value) => {
+  const head = "<tr><th class='gutter'></th>" +
+    outcome.columns.map((c) => "<th>" + escapeHtml(c) + "</th>").join("") + "</tr>";
+  const body = outcome.rows.slice(0, shown).map((row, i) =>
+    "<tr><td class='gutter'>" + (i + 1) + "</td>" + row.map((value) => {
       if (value === null) return "<td class='null'>NULL</td>";
       if (typeof value === "number") return "<td class='num'>" + escapeHtml(value) + "</td>";
       return "<td>" + escapeHtml(value) + "</td>";
@@ -335,9 +415,58 @@ async function autotest() {
   document.title = report.pass ? "AUTOTEST PASS" : "AUTOTEST FAIL";
 }
 
+function showTab(which) {
+  const isPlan = which === "plan";
+  $("#tab-results").classList.toggle("active", !isPlan);
+  $("#tab-plan").classList.toggle("active", isPlan);
+  $("#results").hidden = isPlan;
+  $("#plan-output").hidden = !isPlan;
+}
+
+async function runPlan() {
+  const sql = $("#sql").value.trim().replace(/;+\s*$/, "");
+  if (!sql) return;
+  $("#plan").disabled = true;
+  setStatus("planning…");
+  let outcome;
+  try {
+    outcome = await bridgeCall("bridge.run_sql(" + pyString("explain analyze " + sql) + ")");
+  } catch (exc) {
+    outcome = { ok: false, rendered: "error: the engine itself crashed: " + exc };
+  }
+  $("#plan").disabled = false;
+  showTab("plan");
+  if (!outcome.ok) {
+    $("#plan-output").textContent = outcome.rendered || ("error: " + outcome.error);
+    setStatus("plan failed");
+    return;
+  }
+  // EXPLAIN returns its plan as the message string
+  $("#plan-output").textContent = outcome.message ||
+    "(the query produced rows, not a plan)";
+  setStatus("plan ready in " + outcome.ms + " ms");
+}
+
+async function copyShareLink() {
+  const sql = $("#sql").value.trim().replace(/;+\s*$/, "");
+  if (sql) writeShareHash(sql);
+  try {
+    await navigator.clipboard.writeText(location.href);
+    setStatus("share link copied - it opens with this query mounted");
+  } catch (exc) {
+    setStatus("could not copy; the URL in the address bar is the share link");
+  }
+}
+
 renderDatasets();
 wireUpload();
 $("#run").addEventListener("click", runQuery);
+$("#plan").addEventListener("click", runPlan);
+$("#share").addEventListener("click", copyShareLink);
+$("#tab-results").addEventListener("click", () => showTab("results"));
+$("#tab-plan").addEventListener("click", () => showTab("plan"));
+$("#sql").addEventListener("input", clearUnderline);
+$("#sql").addEventListener("scroll", syncBackdrop);
 $("#sql").addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") runQuery();
 });

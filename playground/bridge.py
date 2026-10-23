@@ -77,7 +77,8 @@ def run_sql(sql):
         result = SESSION.run(sql)
     except SquealError as exc:
         return json.dumps({"ok": False, "error": exc.message,
-                           "rendered": exc.render(sql)})
+                           "rendered": exc.render(sql),
+                           "pos": list(exc.pos) if exc.pos else None})
     except Exception as exc:  # a bug in squeal itself; show it plainly
         return json.dumps({"ok": False, "error": str(exc)})
     ms = round((time.perf_counter() - start) * 1000, 1)

@@ -47,17 +47,27 @@
 
   <main>
     <section class="card editor-card">
-      <textarea id="sql" spellcheck="false"
-        placeholder="select * from people where age > 30"></textarea>
+      <div class="editor-wrap">
+        <div id="editor-backdrop" aria-hidden="true"></div>
+        <textarea id="sql" spellcheck="false"
+          placeholder="select * from people where age > 30"></textarea>
+      </div>
       <div class="editor-row">
         <button id="run" disabled>run &#8984;&#8629;</button>
+        <button id="plan" disabled title="explain analyze">plan</button>
         <span id="status" class="muted">loading the engine&hellip;</span>
       </div>
     </section>
     <section class="card">
       <pre id="error" class="error" role="alert" hidden></pre>
       <pre id="message" class="message" hidden></pre>
+      <div class="tabs">
+        <button id="tab-results" class="tab active">results</button>
+        <button id="tab-plan" class="tab">plan</button>
+        <button id="share" title="copy a link that opens this query">copy share link</button>
+      </div>
       <div id="results"></div>
+      <pre id="plan-output" hidden></pre>
     </section>
   </main>
 </div>
