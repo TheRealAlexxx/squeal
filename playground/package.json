@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Browser playground for squeal. The site itself needs no build; pyodide is only a dev dependency for test_bridge.mjs.",
+  "devDependencies": {
+    "pyodide": "314.0.7"
+  }
+}

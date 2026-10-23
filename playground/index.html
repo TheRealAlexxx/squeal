@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>squeal playground - SQL over CSV in your browser</title>
+<meta name="description" content="Try squeal, a SQL query engine written from scratch in Python, running in your browser via WebAssembly. Upload a CSV, write SQL, see results.">
+<link rel="stylesheet" href="playground.css">
+</head>
+<body>
+
+<div id="boot">
+  <div class="boot-card">
+    <div class="wordmark">squeal</div>
+    <div id="boot-status">starting&hellip;</div>
+    <div class="boot-bar"><div id="boot-fill"></div></div>
+  </div>
+</div>
+
+<header>
+  <div class="wordmark">squeal</div>
+  <p class="tagline">SQL over CSV files, running entirely in your browser.
+    The same from-scratch Python engine as the command line, compiled to
+    WebAssembly. Nothing you load here leaves this tab.</p>
+</header>
+
+<div class="layout">
+  <aside>
+    <section class="card">
+      <h2>sample data</h2>
+      <div id="datasets"></div>
+    </section>
+    <section class="card">
+      <h2>your tables</h2>
+      <div id="tables"><p class="muted">nothing loaded yet</p></div>
+      <label class="upload" for="file-input">
+        drop a .csv anywhere, or <span class="linklike">browse</span>
+        <input id="file-input" type="file" accept=".csv,text/csv" multiple>
+      </label>
+    </section>
+    <section class="card">
+      <h2>example queries</h2>
+      <div id="chips"></div>
+    </section>
+  </aside>
+
+  <main>
+    <section class="card editor-card">
+      <textarea id="sql" spellcheck="false"
+        placeholder="select * from people where age > 30"></textarea>
+      <div class="editor-row">
+        <button id="run" disabled>run &#8984;&#8629;</button>
+        <span id="status" class="muted">loading the engine&hellip;</span>
+      </div>
+    </section>
+    <section class="card">
+      <pre id="error" class="error" hidden></pre>
+      <pre id="message" class="message" hidden></pre>
+      <div id="results"></div>
+    </section>
+  </main>
+</div>
+
+<footer>
+  <p>One file upload, one query, zero servers: the engine is the same
+  Python you can <code>pip install</code> from the repository, executed
+  by Pyodide (CPython compiled to WebAssembly).</p>
+</footer>
+
+<div id="autotest" hidden></div>
+<script type="module" src="playground.js"></script>
+</body>
+</html>
