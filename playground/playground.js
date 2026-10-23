@@ -168,7 +168,9 @@ function showError(text, pos) {
   $("#error").textContent = text;
   $("#error").hidden = false;
   underlineError(pos);
-  $("#error").scrollIntoView({ behavior: "smooth", block: "center" });
+  // instant, not smooth: a tap fired mid-animation stops a smooth scroll
+  // and never reaches the button (real mobile UX bug, reproduced live)
+  $("#error").scrollIntoView({ behavior: "instant", block: "center" });
 }
 
 function clearUnderline() { $("#editor-backdrop").textContent = ""; }
