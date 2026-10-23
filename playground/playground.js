@@ -66,7 +66,7 @@ function bootStep(text, fraction) {
 
 async function boot() {
   const t0 = performance.now();
-  bootStep("downloading the Python runtime (about 12 MB, cached after the first visit)…", 0.1);
+  bootStep("downloading the Python runtime (about 13 MB, cached by your browser after the first visit)…", 0.1);
   const { loadPyodide } = await import(PYODIDE_MODULE);
   pyodide = await loadPyodide({ indexURL: PYODIDE_INDEX });
 
