@@ -90,7 +90,9 @@ async function boot() {
 
   bootedAt = performance.now() - t0;
   $("#boot").classList.add("done");
+  setTimeout(() => { const el = $("#boot"); if (el) el.remove(); }, 500);
   $("#run").disabled = false;
+  document.querySelectorAll("#datasets button.dataset").forEach((b) => { b.disabled = false; });
   setStatus("squeal " + description.version + " ready in " +
             (bootedAt / 1000).toFixed(1) + "s - the engine is running in this tab");
   $("#sql").value = DATASETS[0].queries[0][1];
