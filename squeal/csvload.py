@@ -10,6 +10,8 @@ crashing the query.
 import csv
 import re
 
+from .errors import SquealError
+
 INT_RE = re.compile(r"^[+-]?\d+$")
 FLOAT_RE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?$")
 
@@ -33,17 +35,26 @@ class CsvTable:
 
 
 def load(path):
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        raw = list(csv.reader(fh))
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as fh:
+            raw = list(csv.reader(fh))
+    except UnicodeDecodeError:
+        raise SquealError(
+            "%s is not UTF-8 text; convert it first "
+            "(e.g. iconv -f UTF-16 -t UTF-8)" % path)
     if not raw:
-        return CsvTable([], [], [], path)
+        raise SquealError("%s is empty: no header row" % path)
     columns = [c.strip() or "column%d" % (i + 1) for i, c in enumerate(raw[0])]
     width = len(columns)
     body = []
-    for record in raw[1:]:
+    for line_no, record in enumerate(raw[1:], start=2):
         if not record or all(not cell.strip() for cell in record):
             continue  # skip blank lines
-        record = record[:width] + [""] * (width - len(record))
+        if len(record) > width:
+            raise SquealError(
+                "%s row %d has %d fields but the header has %d"
+                % (path, line_no, len(record), width))
+        record = record + [""] * (width - len(record))
         body.append([cell.strip() or None for cell in record])
     types = [_infer([row[i] for row in body]) for i in range(width)]
     rows = []

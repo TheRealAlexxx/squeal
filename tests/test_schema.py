@@ -66,3 +66,42 @@ class SuggestionTests(unittest.TestCase):
             schema.resolve("orders.regoin")
         self.assertIn("orders.region", str(ctx.exception))
 
+
+
+class CsvLoadRobustnessTests(unittest.TestCase):
+    def _write(self, text, name="tmp.csv"):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), name)
+        with open(path, "wb") as fh:
+            fh.write(text)
+        return path
+
+    def test_ragged_extra_fields_are_an_error_not_silent_loss(self):
+        from squeal.csvload import load
+        from squeal.errors import SquealError
+        path = self._write(b"a,b\n1,2\n3,4,5\n")
+        with self.assertRaises(SquealError) as ctx:
+            load(path)
+        self.assertIn("row 3 has 3 fields but the header has 2",
+                      str(ctx.exception))
+
+    def test_short_rows_still_pad_with_nulls(self):
+        from squeal.csvload import load
+        path = self._write(b"a,b\n1,\n")
+        self.assertEqual(load(path).rows, [(1, None)])
+
+    def test_non_utf8_is_a_clean_error(self):
+        from squeal.csvload import load
+        from squeal.errors import SquealError
+        path = self._write(b"\xff\xfe\xa0\x00bad")
+        with self.assertRaises(SquealError) as ctx:
+            load(path)
+        self.assertIn("not UTF-8", str(ctx.exception))
+
+    def test_empty_file_is_a_clean_error(self):
+        from squeal.csvload import load
+        from squeal.errors import SquealError
+        path = self._write(b"")
+        with self.assertRaises(SquealError) as ctx:
+            load(path)
+        self.assertIn("empty", str(ctx.exception))
