@@ -91,6 +91,52 @@ class WithTests(unittest.TestCase):
         r = run("with recursive r as (select 1) select * from r")
         self.assertEqual(r.rows, [(1,)])
 
+    def test_explain_join_over_a_cte(self):
+        # planning a join asks for both sides' schemas; the planner's
+        # resolver used to know nothing of WITH names and failed with
+        # "no such table or file: t" while the query itself ran fine
+        from squeal.cli import Session
+        q = ("with t as (select name from '%s') "
+             "select x.name from t x join t y on x.name = y.name"
+             % os.path.join(FIXTURES, "people.csv"))
+        out = Session().run("explain " + q)
+        self.assertIn("Hash Join  t as y", out)
+        out = Session().run("explain analyze " + q)
+        self.assertIn("Hash Join  t as y", out)
+        self.assertIn("Cte  t   --", out)
+
+    def test_explain_join_over_a_recursive_cte(self):
+        from squeal.cli import Session
+        out = Session().run(
+            "explain with recursive t as (select 1 as i union all "
+            "select i + 1 from t where i < 3) "
+            "select x.i from t x join t y on x.i = y.i")
+        self.assertIn("Hash Join  t as y", out)
+        self.assertIn("Cte  t (recursive)", out)
+
+    def test_explain_cte_join_surfaces_body_runtime_error(self):
+        # planning the join materializes the CTE body once, so a runtime
+        # error in it surfaces from plain EXPLAIN; a non-join EXPLAIN
+        # over the same body still plans without executing
+        from squeal.cli import Session
+        q = "with t as (select 1 / 0 as i) select x.i from t x join t y on x.i = y.i"
+        with self.assertRaises(SquealError) as cm:
+            Session().run("explain " + q)
+        self.assertIn("division by zero", str(cm.exception))
+        out = Session().run("explain with t as (select 1 / 0 as i) select i from t")
+        self.assertIn("Project  (1 / 0)", out)
+
+    def test_explain_cte_join_respects_recursive_row_guard(self):
+        # an unbounded recursive CTE in a join explains through the same
+        # 100,000-row guard instead of hanging
+        from squeal.cli import Session
+        with self.assertRaises(SquealError) as cm:
+            Session().run(
+                "explain with recursive t as (select 1 as i union all "
+                "select i + 1 from t) select x.i from t x join t y on "
+                "x.i = y.i")
+        self.assertIn("row guard", str(cm.exception))
+
     def test_explain_lists_cte_pipeline(self):
         from squeal.cli import Session
         out = Session().run(

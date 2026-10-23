@@ -93,6 +93,15 @@ CTE "Cte <name> (recursive)"; EXPLAIN ANALYZE shows its materialized
 row count on that line but no per-stage counts underneath, because
 each stage ran once per iteration and one number would be fiction.
 An unused CTE's stages are likewise left unmeasured: it never ran.
+
+EXPLAIN of a query that joins over a CTE also materializes the CTE
+body once, during planning: picking a join strategy needs both sides'
+schemas, and a CTE's schema comes from running it (views already
+behave this way). So a plain EXPLAIN of a CTE join costs in proportion
+to the CTE's rows, surfaces a runtime error from the body (division by
+zero, say) instead of rendering a plan, and a recursive CTE is bounded
+by the same 100,000-row guard. EXPLAIN of a non-join query does not run
+CTE bodies.
 The recursive term computes new
 rows from one working table at a time, so it cannot use aggregate
 functions, window functions, GROUP BY, or HAVING - those have no

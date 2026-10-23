@@ -68,6 +68,15 @@ def _compound_plan(select, resolve=None):
 
 def plan(select, resolve=None):
     """Return the EXPLAIN tree as a list of (depth, text) lines."""
+    # Join strategy and schema questions need to resolve source names,
+    # and Session.resolve knows nothing of statement-scoped WITH names.
+    # Wrap the resolver the same way execute() does; a CTE scan during
+    # planning materializes it once for the render, the same treatment
+    # views already get when they are resolved.
+    if select.ctes and resolve is not None:
+        from .executor import _with_ctes
+        resolve = _with_ctes(select.ctes, resolve, {}, None, None,
+                             select.recursive)
     if select.compounds:
         lines = _compound_plan(select, resolve)
     else:
