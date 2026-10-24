@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fixed silent row loss in the CSV reader: a line of just commas, a
+  quoted empty field, or a line of spaces now loads as a row of NULLs
+  instead of being skipped. Only truly empty lines are skipped; short
+  rows stay NULL-padded to the header width
+
 ## 0.3.0 - 2026-10-23
 
 - sqllogictest-subset corpus in tests/sqllogictest: 80 records,
