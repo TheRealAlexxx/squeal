@@ -4,7 +4,8 @@ A column becomes int when every value looks like an integer, float when
 every value is numeric, otherwise it stays text. Empty cells are NULL.
 The guess uses the whole file, not just the first row, so one stray
 "pending" in a sea of numbers demotes the column to text rather than
-crashing the query.
+crashing the query. Only truly empty lines are skipped; every
+other record is a row, NULL-padded to the header width.
 """
 
 import csv
@@ -48,8 +49,11 @@ def load(path):
     width = len(columns)
     body = []
     for line_no, record in enumerate(raw[1:], start=2):
-        if not record or all(not cell.strip() for cell in record):
-            continue  # skip blank lines
+        # csv.reader yields [] only for a truly empty line; that is the
+        # only thing skipped. Every non-empty parsed record is data,
+        # with short records NULL-padded to the header width below.
+        if not record:
+            continue
         if len(record) > width:
             raise SquealError(
                 "%s row %d has %d fields but the header has %d"

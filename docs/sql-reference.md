@@ -164,6 +164,10 @@ row set and cannot mix with GROUP BY.
   arithmetic with NULL yield NULL; WHERE keeps only TRUE.
 - Column types are inferred per CSV column from the whole file: int,
   float, or text. Empty cells are NULL.
+- Only truly empty CSV lines are skipped. Every other record is a
+  row: a line of just commas, a quoted empty field, or a line of
+  spaces all become rows of NULLs, with short rows padded to the
+  header width.
 - Numbers always compare less than text, so mixed columns never crash
   a comparison.
 - ORDER BY puts NULLs last in both directions.
