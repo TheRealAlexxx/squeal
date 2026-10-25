@@ -20,8 +20,11 @@ class SquealError(Exception):
         if self.pos is None or not sql:
             return "error: " + self.message
         line_no, col = self.pos
-        lines = sql.splitlines()
+        # The lexer advances lines on "\n" only; split the same way so the
+        # caret lands on the line the lexer counted. splitlines() also
+        # breaks on \r, \x0b, \u2028 and friends, shifting later lines.
+        lines = sql.split("\n")
         if line_no - 1 >= len(lines):
             return "error: " + self.message
-        text = lines[line_no - 1]
+        text = lines[line_no - 1].rstrip("\r")
         return "error: %s\n  %s\n  %s^" % (self.message, text, " " * (col - 1))

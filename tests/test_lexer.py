@@ -55,6 +55,28 @@ class TestLexer(unittest.TestCase):
         with self.assertRaises(SquealError):
             tokenize("select `weird`")
 
+    def test_error_render_ignores_splitlines_extras(self):
+        # Vertical tab inside a string must not shift the caret's line:
+        # the lexer counts lines on "\n" only.
+        sql = "select 'a\x0bb' from t where x ="
+        err = SquealError("bad", (1, 30))
+        self.assertIn(sql, err.render(sql))
+
+    def test_error_render_unicode_line_separator(self):
+        sql = "select 'a\u2028b' from t\nwhere x ="
+        err = SquealError("bad", (2, 10))
+        self.assertEqual(err.render(sql).splitlines()[1], "  where x =")
+
+    def test_error_render_bare_cr_is_one_line(self):
+        sql = "select 1\rfrom t\rwhere x ="
+        err = SquealError("bad", (1, 8))
+        self.assertIn("select 1", err.render(sql).splitlines()[1])
+
+    def test_error_render_crlf_strips_cr(self):
+        sql = "select 1\r\nfrom t"
+        err = SquealError("bad", (1, 5))
+        self.assertNotIn("\r", err.render(sql))
+
     def test_error_render_has_caret(self):
         err = SquealError("unexpected character: `", (2, 4))
         out = err.render("select\nabc`def")
