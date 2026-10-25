@@ -303,6 +303,10 @@ def _agg_count(values, star):
 
 def _agg_sum(values, star):
     present = [v for v in values if v is not None]
+    for v in present:
+        if isinstance(v, str):
+            from .errors import SquealError
+            raise SquealError("sum() needs numeric values, got text")
     return sum(present) if present else None
 
 
@@ -310,6 +314,10 @@ def _agg_avg(values, star):
     present = [v for v in values if v is not None]
     if not present:
         return None
+    for v in present:
+        if isinstance(v, str):
+            from .errors import SquealError
+            raise SquealError("avg() needs numeric values, got text")
     return sum(present) / len(present)
 
 
