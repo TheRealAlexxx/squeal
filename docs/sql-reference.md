@@ -30,6 +30,9 @@ that references itself is an error.
 
 A select item is `expr [AS alias]`, `*`, or a window call.
 
+Comments: `--` starts a line comment that runs to the end of the line.
+Block comments (`/* ... */`) are not part of the subset.
+
 ### Compound selects
 
 `UNION`, `INTERSECT` and `EXCEPT` deduplicate rows; `UNION ALL` keeps
