@@ -30,6 +30,9 @@ that references itself is an error.
 
 A select item is `expr [AS alias]`, `*`, or a window call.
 
+Comments: `--` starts a line comment that runs to the end of the line.
+Block comments (`/* ... */`) are not part of the subset.
+
 ### Compound selects
 
 `UNION`, `INTERSECT` and `EXCEPT` deduplicate rows; `UNION ALL` keeps
@@ -170,6 +173,8 @@ row set and cannot mix with GROUP BY.
   header width.
 - Numbers always compare less than text, so mixed columns never crash
   a comparison.
+- sum() and avg() raise an error on text values, where SQLite silently
+  treats text as 0.0. min(), max() and count() accept any type.
 - ORDER BY puts NULLs last in both directions.
 - Subqueries may be correlated (the inner query can reference outer
   columns). Uncorrelated ones are executed once and cached for the

@@ -154,12 +154,21 @@ def _aggregate(call, table, mask, idxs=None):
     if not values:
         return None
     if name == "sum":
+        _numeric(name, values)
         return sum(values)
     if name == "avg":
+        _numeric(name, values)
         return sum(values) / len(values)
     if name == "min":
         return min(values)
     return max(values)
+
+
+def _numeric(name, values):
+    for v in values:
+        if isinstance(v, str):
+            from .errors import SquealError
+            raise SquealError("%s() needs numeric values, got text" % name)
 
 
 def _same_column(a, b):

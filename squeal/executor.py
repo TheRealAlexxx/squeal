@@ -91,6 +91,23 @@ def eval_expr(node, ctx):
     if isinstance(node, ast.InList):
         value = eval_expr(node.expr, ctx)
         if value is None:
+            # NULL never equals a candidate, but over an EMPTY candidate
+            # list the comparison is vacuous: IN is FALSE, NOT IN is TRUE.
+            empty = True
+            for candidate in node.values:
+                if isinstance(candidate, ast.Subquery):
+                    result = _subquery_rows(candidate.select, ctx)
+                    if len(result.columns) != 1:
+                        raise SquealError("an IN subquery must return "
+                                          "exactly one column")
+                    if result.rows:
+                        empty = False
+                        break
+                else:
+                    empty = False
+                    break
+            if empty:
+                return True if node.negated else False
             return None
         mode_key = ("inlist-mode", id(node))
         if mode_key not in ctx.exec_cache:

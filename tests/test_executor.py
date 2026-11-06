@@ -51,6 +51,30 @@ class WhereTests(unittest.TestCase):
         r = run("select count(*) from people where city not in ('London')")
         self.assertEqual(r.rows[0][0], 3)
 
+    def test_not_in_empty_subquery_keeps_null_rows(self):
+        r = run("select name from people where age not in "
+                "(select age from people where age > 1000) order by name")
+        self.assertEqual(len(r.rows), 6)
+
+    def test_in_empty_subquery_matches_nothing(self):
+        r = run("select name from people where age in "
+                "(select age from people where age > 1000)")
+        self.assertEqual(r.rows, [])
+
+    def test_null_not_in_empty_subquery_is_true(self):
+        r = run("select null not in (select age from people where age > 1000)")
+        self.assertEqual(r.rows[0][0], True)
+
+    def test_null_not_in_nonempty_subquery_stays_null(self):
+        # Katherine's NULL age stays unknown against a non-empty set.
+        r = run("select name from people where age not in "
+                "(select age from people where age = 34)")
+        self.assertEqual(len(r.rows), 4)
+
+    def test_null_in_expression_list_stays_null(self):
+        r = run("select null in (1, 2)")
+        self.assertEqual(r.rows[0][0], None)
+
     def test_between(self):
         r = run("select name from people where age between 30 and 40 order by name")
         self.assertEqual([row[0] for row in r.rows], ["Ada", "Edsger"])

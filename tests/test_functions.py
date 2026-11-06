@@ -63,6 +63,36 @@ class ScalarFunctionTests(unittest.TestCase):
             one("select iif(1, 2) from people")
 
 
+class AggregateTypeErrorTests(unittest.TestCase):
+    def test_sum_over_text_errors(self):
+        with self.assertRaises(SquealError):
+            one("select sum(name) from people")
+
+    def test_avg_over_text_errors(self):
+        with self.assertRaises(SquealError):
+            one("select avg(city) from people")
+
+    def test_sum_over_text_per_group_errors(self):
+        with self.assertRaises(SquealError):
+            execute(parse("select city, sum(name) from people group by city"),
+                    load(FIXTURE))
+
+    def test_min_max_count_over_text_still_work(self):
+        r = execute(parse("select min(name), max(name), count(name) from people"),
+                    load(FIXTURE))
+        self.assertEqual(r.rows[0], ("Ada", "Katherine", 6))
+
+    def test_columnar_sum_over_text_errors(self):
+        from squeal import columnar
+        with self.assertRaises(SquealError):
+            columnar.run(parse("select sum(name) from people"), load(FIXTURE))
+
+    def test_columnar_avg_over_text_errors(self):
+        from squeal import columnar
+        with self.assertRaises(SquealError):
+            columnar.run(parse("select avg(city) from people"), load(FIXTURE))
+
+
 if __name__ == "__main__":
     unittest.main()
 
