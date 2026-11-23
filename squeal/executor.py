@@ -678,10 +678,92 @@ def _order_limit_offset(select, out_columns, rows, what):
 
 RECURSIVE_ROW_GUARD = 100_000
 
+# Tests flip this off to force the generic per-iteration execute() path
+# for recursive terms; the two paths must agree row for row.
+_PREPARED_RECURSIVE = True
+
 
 def _refs_to(select, name):
     return [n for n in select.walk()
             if isinstance(n, ast.TableRef) and n.name == name]
+
+
+class _PreparedTerm:
+    """A recursive term analyzed once, then evaluated per working table.
+
+    The generic loop runs the whole execute() pipeline on every
+    iteration: window and aggregate analysis, positional mapping and
+    projection planning all walk a term whose text never changes, on a
+    working table whose columns the anchor fixed before the loop began.
+    Everything captured here depends only on those two constants. What
+    still varies per iteration is the working rows and the resolve that
+    binds the CTE name, so those stay arguments of run(); the WHERE
+    fallback reads the current resolve through self.binding.
+
+    Only stages the validation above has already ruled out are skipped
+    (aggregates, windows, GROUP BY, HAVING). Anything with its own
+    CTEs, compounds, ORDER BY or LIMIT stays on the generic path, whose
+    per-iteration semantics for those are already correct.
+    """
+
+    __slots__ = ("schema", "pred", "out_columns", "project", "distinct",
+                 "exec_cache", "outer", "binding")
+
+    def __init__(self, rec, name, columns, exec_cache, outer):
+        qual = rec.source.alias or _qualifier_for(rec.source.name)
+        self.schema = Schema([(qual, c) for c in columns])
+        self.exec_cache = exec_cache
+        self.outer = outer
+        self.binding = None
+        if rec.where is not None:
+            schema = self.schema
+
+            def fallback(node):
+                return lambda r: eval_expr(
+                    node, RowContext(schema, r, self.binding,
+                                     exec_cache, outer))
+
+            self.pred = _compile(rec.where, self.schema, fallback)
+        else:
+            self.pred = None
+        self.out_columns, self.project = _projection(rec, self.schema.names)
+        self.distinct = rec.distinct
+
+    def run(self, work, resolve):
+        """One iteration: the generic path's row pipeline, nothing else."""
+        self.binding = resolve
+        rows = work
+        if self.pred is not None:
+            pred = self.pred
+            rows = [r for r in rows if truthy(pred(r)) is True]
+        project = self.project
+        schema = self.schema
+        exec_cache = self.exec_cache
+        outer = self.outer
+        projected = []
+        for r in rows:
+            ctx = RowContext(schema, r, resolve, exec_cache, outer)
+            projected.append(tuple(project(ctx)))
+        if self.distinct:
+            seen = set()
+            unique = []
+            for row in projected:
+                if row not in seen:
+                    seen.add(row)
+                    unique.append(row)
+            projected = unique
+        return projected
+
+
+def _preparable(rec, name):
+    """A bare scan of the CTE with no stages of its own: the prepared
+    plan can then reproduce the generic path exactly. Anything else
+    keeps the generic per-iteration execute()."""
+    return (isinstance(rec.source, ast.TableRef)
+            and rec.source.name == name
+            and not rec.ctes and not rec.compounds
+            and not rec.order_by and rec.limit is None
+            and rec.offset is None)
 
 
 def _materialize_recursive(name, cte, wrapped, exec_cache, outer, stats,
@@ -757,6 +839,9 @@ def _materialize_recursive(name, cte, wrapped, exec_cache, outer, stats,
         stop_at = row_cap if stop_at is None else min(stop_at, row_cap)
 
     from .csvload import CsvTable
+    prepared = None
+    if _PREPARED_RECURSIVE and _preparable(rec, name):
+        prepared = _PreparedTerm(rec, name, columns, exec_cache, outer)
     all_rows = []
     seen = set()
     work = []
@@ -775,9 +860,12 @@ def _materialize_recursive(name, cte, wrapped, exec_cache, outer, stats,
                 return _t
             return wrapped(nm)
 
-        rec_result = execute(rec, rec_resolve, None, exec_cache, outer)
+        if prepared is not None:
+            rec_rows = prepared.run(work, rec_resolve)
+        else:
+            rec_rows = execute(rec, rec_resolve, None, exec_cache, outer).rows
         new = []
-        for r in rec_result.rows:
+        for r in rec_rows:
             key = tuple(_hashable(v) for v in r)
             if op == "union_all" or key not in seen:
                 seen.add(key)
