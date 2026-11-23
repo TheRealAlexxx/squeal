@@ -90,7 +90,8 @@ accumulation early, either written on the CTE itself or pushed down
 from a plain outer scan like `select * from x limit 5`. Rows come out
 in SQLite's queue order - anchor first, then each level in the order
 its parents were produced - so a capped scan returns the same prefix
-SQLite would. ORDER BY and LIMIT on the CTE itself apply to the
+SQLite would, unless the recursive term is DISTINCT (a difference
+called out in the list below). ORDER BY and LIMIT on the CTE itself apply to the
 accumulated rows after iteration. EXPLAIN marks a self-referencing
 CTE "Cte <name> (recursive)"; EXPLAIN ANALYZE shows its materialized
 row count on that line but no per-stage counts underneath, because
@@ -196,6 +197,16 @@ row set and cannot mix with GROUP BY.
   and LIMIT on a recursive CTE to the accumulated rows after
   iteration, so the same query can return different (and, squeal
   would argue, the promised) rows.
+- DISTINCT in a recursive term is level-wide, not per-row. squeal
+  evaluates the term once per working table and dedupes that whole
+  result; SQLite evaluates it per dequeued row, so duplicate working
+  rows each emit their own copy. With seeds (1),(1),
+  `select distinct n + 1 from x where n < 2` under UNION ALL yields
+  one 2 in squeal and two in SQLite. Same root as the ORDER BY
+  divergence above: a level-synchronous working table where SQLite
+  runs a single-row queue. The level-wide reading is the standard
+  meaning of SELECT DISTINCT over an iteration's output, so squeal
+  keeps it; UNION (not ALL) dedupe is unaffected either way.
 - There is no CAST. Types come from the CSV, so `cast(age as text)`
   fails at parse time with a pointer at the `as`. If you need a number
   as text, export and convert, or use || with an empty string:
