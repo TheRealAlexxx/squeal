@@ -682,6 +682,10 @@ RECURSIVE_ROW_GUARD = 100_000
 # for recursive terms; the two paths must agree row for row.
 _PREPARED_RECURSIVE = True
 
+# Tests flip this off to force the RowContext pipeline for plain scans;
+# the compiled pipeline must agree row for row.
+_COMPILED_ROW_PIPELINE = True
+
 
 def _refs_to(select, name):
     return [n for n in select.walk()
@@ -1043,6 +1047,7 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
     aggregated = bool(select.group_by) or any(has_aggregate(e) for e, _ in select.items) \
         or (select.having is not None and has_aggregate(select.having)) \
         or any(has_aggregate(e) for e, _ in select.order_by)
+    fast = None
     if windows and aggregated:
         raise SquealError("window functions cannot be mixed with GROUP BY "
                           "or aggregates yet")
@@ -1069,33 +1074,56 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
             contexts = [c for c in contexts
                         if truthy(eval_expr(select.having, c)) is True]
     else:
-        contexts = [RowContext(schema, r, resolve, exec_cache, outer) for r in rows]
         if select.having is not None:
             raise SquealError("HAVING needs GROUP BY or an aggregate")
+        fast = None
         if windows:
+            contexts = [RowContext(schema, r, resolve, exec_cache, outer)
+                        for r in rows]
             computed = compute_windows(windows, schema, rows, resolve, exec_cache)
             for i, ctx in enumerate(contexts):
                 ctx.window_values = {node_id: vals[i]
                                      for node_id, vals in computed.items()}
-
+        else:
+            if _COMPILED_ROW_PIPELINE:
+                fast = _compiled_row_fns(select, schema, select_order_by)
+            if fast is None:
+                contexts = [RowContext(schema, r, resolve, exec_cache, outer)
+                            for r in rows]
     if stats is not None:
-        stats["contexts"] = len(contexts)
+        stats["contexts"] = len(rows) if fast is not None else len(contexts)
     out_columns, project = _projection(select, columns)
-    projected = []
-    order_keys = []
-    for ctx in contexts:
-        row = tuple(project(ctx))
-        projected.append(row)
-        keys = []
-        for expr, _ in select_order_by:
-            # ORDER BY may name a select alias or output column
-            if isinstance(expr, ast.Column) and expr.name in out_columns:
-                keys.append(row[out_columns.index(expr.name)])
-            else:
-                keys.append(eval_expr(expr, ctx))
-        order_keys.append(keys)
-
-    pairs = list(zip(projected, order_keys))
+    start = select.offset or 0
+    end = None if select.limit is None else start + select.limit
+    if fast is not None:
+        readers, key_fns, slots = fast
+        order_keys = [[kf(r) for kf in key_fns] for r in rows]
+        # With a LIMIT and a projection of plain column reads (nothing that
+        # could raise on a row), sorting first and projecting only the
+        # survivors is exact: discarded rows have no observable effect.
+        deferred = slots is not None and select.limit is not None \
+            and not select.distinct
+        if deferred:
+            projected = None
+        else:
+            projected = [tuple(f(r) for f in readers) for r in rows]
+        pairs = list(zip(rows if deferred else projected, order_keys))
+    else:
+        deferred = False
+        projected = []
+        order_keys = []
+        for ctx in contexts:
+            row = tuple(project(ctx))
+            projected.append(row)
+            keys = []
+            for expr, _ in select_order_by:
+                # ORDER BY may name a select alias or output column
+                if isinstance(expr, ast.Column) and expr.name in out_columns:
+                    keys.append(row[out_columns.index(expr.name)])
+                else:
+                    keys.append(eval_expr(expr, ctx))
+            order_keys.append(keys)
+        pairs = list(zip(projected, order_keys))
     if select_order_by:
         # decorate-sort: one stable pass per key, last key first. NULLs last
         # in both directions (reverse=True flips flags, so desc uses 0 for NULL).
@@ -1107,7 +1135,11 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
                     return (0 if desc else 1, (0, 0.0))
                 return (1 if desc else 0, _sort_key(v))
             pairs.sort(key=kf, reverse=bool(desc))
-    projected = [p for p, _ in pairs]
+    if deferred:
+        slots = fast[2]
+        projected = [tuple(r[s] for s in slots) for r, _ in pairs[start:end]]
+    else:
+        projected = [p for p, _ in pairs]
 
     if select.distinct:
         seen = set()
@@ -1119,10 +1151,9 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
         projected = unique
 
     if stats is not None:
-        stats["projected"] = len(projected)
-    start = select.offset or 0
-    end = None if select.limit is None else start + select.limit
-    result = Result(out_columns, projected[start:end])
+        stats["projected"] = len(projected) if not deferred else len(rows)
+    result = Result(out_columns,
+                    projected if deferred else projected[start:end])
     if stats is not None:
         stats["rows"] = len(result.rows)
     return result
@@ -1142,6 +1173,77 @@ def _cmp_rows(a, b, descs):
         result = -1 if ka < kb else 1
         return -result if desc else result
     return 0
+
+
+def _slot_reader(slot):
+    return lambda r: r[slot]
+
+
+class _Uncompilable(Exception):
+    pass
+
+
+def _reject(node):
+    raise _Uncompilable
+
+
+def _try_compile(expr, schema):
+    """_compile when every node fits the closure compiler, else None."""
+    try:
+        return _compile(expr, schema, _reject)
+    except _Uncompilable:
+        return None
+
+
+def _compiled_row_fns(select, schema, select_order_by):
+    """Closure-compiled projection and ORDER BY keys for a plain scan,
+    or None when anything in the row pipeline needs the interpreter.
+
+    RowContext exists so eval_expr can resolve names per row. When every
+    projection item and ORDER BY key compiles to a closure over the raw
+    row, the context is never built and a row costs only its closures.
+    Anything the compiler rejects - subqueries, CASE, function calls,
+    outer-correlated names - keeps the RowContext path unchanged.
+
+    Returns (readers, key_fns, slots): readers project a raw row to the
+    output tuple, key_fns compute one ORDER BY key each (an alias key
+    reads its projection item's closure, exactly the value the RowContext
+    path reads from the projected row), and slots is the raw-slot list
+    when every item is a plain column or *, else None.
+    """
+    readers = []
+    slots = []
+    pure = True
+    for expr, _alias in select.items:
+        if isinstance(expr, ast.Star):
+            for slot in range(len(schema.names)):
+                readers.append(_slot_reader(slot))
+                slots.append(slot)
+        elif isinstance(expr, ast.Column):
+            try:
+                slot = schema.resolve(expr.name)
+            except SquealError:
+                return None  # outer-correlated: keeps the interpreter
+            readers.append(_slot_reader(slot))
+            slots.append(slot)
+        else:
+            f = _try_compile(expr, schema)
+            if f is None:
+                return None
+            readers.append(f)
+            pure = False
+    names = _projection(select, schema.names)[0]
+    key_fns = []
+    for expr, _desc in select_order_by:
+        # ORDER BY may name a select alias or output column
+        if isinstance(expr, ast.Column) and expr.name in names:
+            key_fns.append(readers[names.index(expr.name)])
+        else:
+            f = _try_compile(expr, schema)
+            if f is None:
+                return None
+            key_fns.append(f)
+    return readers, key_fns, (slots if pure else None)
 
 
 def _projection(select, columns):
