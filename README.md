@@ -11,7 +11,7 @@ runs 8x to 53x slower than SQLite ([honest numbers](docs/benchmarks.md)).
 The point is the other direction. The whole engine fits in your head,
 the dialect is one documented page with its differences called out,
 and correctness is a published, checkable claim: 327 tests plus an
-80-record [sqllogictest corpus](tests/sqllogictest) verified against
+81-record [sqllogictest corpus](tests/sqllogictest) verified against
 SQLite, with every deliberate difference pinned and explained.
 
 ![Query the bundled CSVs in the browser playground, then read the plan](docs/demo.gif)
@@ -190,7 +190,7 @@ engine's row-for-row parity with the row engine, and the CLI end to
 end: 327 tests. CI
 runs it on Python 3.9 through 3.12.
 
-The published correctness claim is a sqllogictest subset: 80 records
+The published correctness claim is a sqllogictest subset: 81 records
 in [tests/sqllogictest](tests/sqllogictest), where the feature files
 were verified against SQLite at generation time and
 [pinned.test](tests/sqllogictest/pinned.test) documents each deliberate
