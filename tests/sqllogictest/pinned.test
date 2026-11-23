@@ -72,9 +72,10 @@ statement error no such column: n
 select city, count(*) as n from people group by city having n >= 2
 
 # DISTINCT in a recursive term is level-wide: squeal runs the term once
-# per working table, the standard working-table algorithm PostgreSQL also
-# documents; SQLite runs it per dequeued row, so duplicate working rows
-# each emit their own copy. See docs/sql-reference.md.
+# per working table, a working-table evaluation PostgreSQL's docs also
+# describe; SQLite runs it per dequeued row, so duplicate working rows
+# each emit their own copy. A deliberate difference, documented in
+# docs/sql-reference.md.
 query R nosort
 with recursive x(t) as (select temp from readings where temp = 1.5 union all select distinct t + 1 from x where t < 2) select t from x
 ----

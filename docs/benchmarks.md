@@ -16,13 +16,13 @@ A 2 GB RAM container, CPython 3.10. Your machine will differ.
 
 | query | squeal | SQLite | slower by |
 | --- | --- | --- | --- |
-| filter + count | 10 ms | 0.5 ms | 20x |
-| group by + having | 17 ms | 2.2 ms | 8x |
-| hash join + group | 30 ms | 3.8 ms | 8x |
-| window: row_number | 94 ms | 11.3 ms | 8x |
-| order by + limit | 27 ms | 0.5 ms | 53x |
-| subquery in | 16 ms | 0.9 ms | 18x |
-| recursive: 10k chain | 41 ms | 1.6 ms | 26x |
+| filter + count | 7 ms | 0.4 ms | 18x |
+| group by + having | 16 ms | 2.3 ms | 7x |
+| hash join + group | 40 ms | 3.9 ms | 10x |
+| window: row_number | 103 ms | 10.3 ms | 10x |
+| order by + limit | 12 ms | 0.5 ms | 24x |
+| subquery in | 17 ms | 0.9 ms | 18x |
+| recursive: 10k chain | 42 ms | 1.6 ms | 27x |
 
 The SQLite column comes from `benchmarks/run.py --compare-sqlite`,
 which loads the same generated CSVs into an in-memory SQLite with the
@@ -66,11 +66,20 @@ work after the subquery fixes:
    Terms with their own CTEs, compounds, ORDER BY or LIMIT still use
    the generic loop, and a parity suite holds the two paths row for
    row equal.
+7. A plain ORDER BY + LIMIT scan paid the interpreter twice per row
+   (ORDER BY key and projection), plus a RowContext allocation, plus a
+   schema lookup per column reference; the sort itself was 3 ms of 32.
+   Compiling the projection and keys to closures once per query, the
+   same mechanism WHERE already used, and projecting only the LIMIT
+   survivors when the projection is pure column reads, took order by +
+   limit from 27 ms to 12 ms. Anything the closure compiler rejects
+   still runs the RowContext pipeline, held row-for-row equal by a
+   parity suite.
 
  SQLite is C with decades of tuning, so the
-8x to 53x gap above is the honest cost of that trade. Where the gap
+7x to 27x gap above is the honest cost of that trade. Where the gap
 is smallest (window functions, grouping) squeal is doing nearly the
-same work SQLite is; where it is largest (sorting, recursion) the
+same work SQLite is; where it is largest (recursion, sorting) the
 interpreter overhead dominates. It is fast enough to be useful on real
 CSVs and slow enough to keep the code honest. That trade is deliberate.
 

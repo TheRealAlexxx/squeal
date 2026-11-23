@@ -204,9 +204,10 @@ row set and cannot mix with GROUP BY.
   `select distinct n + 1 from x where n < 2` under UNION ALL yields
   one 2 in squeal and two in SQLite. Same root as the ORDER BY
   divergence above: a level-synchronous working table where SQLite
-  runs a single-row queue. The level-wide reading is the standard
-  meaning of SELECT DISTINCT over an iteration's output, so squeal
-  keeps it; UNION (not ALL) dedupe is unaffected either way.
+  runs a single-row queue. The level-wide reading is how SELECT
+  DISTINCT reads over one iteration's output - PostgreSQL's documented
+  evaluation behaves the same way - so squeal keeps it; UNION (not
+  ALL) dedupe is unaffected either way.
 - There is no CAST. Types come from the CSV, so `cast(age as text)`
   fails at parse time with a pointer at the `as`. If you need a number
   as text, export and convert, or use || with an empty string:
