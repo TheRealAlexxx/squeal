@@ -7,7 +7,7 @@ parser, expression evaluator, row executor, EXPLAIN, CLI/REPL, each
 stage one small module.
 
 It is not fast, and it does not pretend to be: on the measured set it
-runs 7x to 121x slower than SQLite ([honest numbers](docs/benchmarks.md)).
+runs 8x to 53x slower than SQLite ([honest numbers](docs/benchmarks.md)).
 The point is the other direction. The whole engine fits in your head,
 the dialect is one documented page with its differences called out,
 and correctness is a published, checkable claim: 324 tests plus an

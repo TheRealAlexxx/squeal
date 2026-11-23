@@ -12,17 +12,17 @@ PYTHONPATH=. python3 benchmarks/run.py --rows 10000
 
 ## Numbers from the development sandbox
 
-A 1 GB RAM container, CPython 3.10. Your machine will differ.
+A 2 GB RAM container, CPython 3.10. Your machine will differ.
 
 | query | squeal | SQLite | slower by |
 | --- | --- | --- | --- |
-| filter + count | 10 ms | 0.7 ms | 14x |
-| group by + having | 19 ms | 2.6 ms | 7x |
-| hash join + group | 34 ms | 4.5 ms | 8x |
-| window: row_number | 109 ms | 13.6 ms | 8x |
-| order by + limit | 29 ms | 0.6 ms | 49x |
-| subquery in | 19 ms | 1.1 ms | 18x |
-| recursive: 10k chain | 255 ms | 2.1 ms | 121x |
+| filter + count | 10 ms | 0.5 ms | 20x |
+| group by + having | 17 ms | 2.2 ms | 8x |
+| hash join + group | 30 ms | 3.8 ms | 8x |
+| window: row_number | 94 ms | 11.3 ms | 8x |
+| order by + limit | 27 ms | 0.5 ms | 53x |
+| subquery in | 16 ms | 0.9 ms | 18x |
+| recursive: 10k chain | 41 ms | 1.6 ms | 26x |
 
 The SQLite column comes from `benchmarks/run.py --compare-sqlite`,
 which loads the same generated CSVs into an in-memory SQLite with the
@@ -57,11 +57,20 @@ work after the subquery fixes:
    to closures once per query, with a fallback to the interpreter
    for everything else, took filter + count from 28 ms to 9 ms.
    Schema lookups are memoized along the way.
+6. Every iteration of a recursive CTE re-ran the whole query pipeline
+   on a term whose text never changes: window and aggregate analysis,
+   positional mapping and projection planning are all per-query work,
+   not per-iteration work. Analyzing the term once and running only
+   the row pipeline per iteration took the 10k chain from 200 ms to
+   about 40 ms on the same machine (126x to 26x against SQLite).
+   Terms with their own CTEs, compounds, ORDER BY or LIMIT still use
+   the generic loop, and a parity suite holds the two paths row for
+   row equal.
 
  SQLite is C with decades of tuning, so the
-7x to 121x gap above is the honest cost of that trade. Where the gap
+8x to 53x gap above is the honest cost of that trade. Where the gap
 is smallest (window functions, grouping) squeal is doing nearly the
-same work SQLite is; where it is largest (recursion, sorting) the
+same work SQLite is; where it is largest (sorting, recursion) the
 interpreter overhead dominates. It is fast enough to be useful on real
 CSVs and slow enough to keep the code honest. That trade is deliberate.
 
