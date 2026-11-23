@@ -78,15 +78,25 @@ QUERIES = [
     "select id from readings order by temp desc limit 4 offset 2",
 ]
 
+# (sql, expected error substring): a failing projection and a failing
+# key must compete in baseline evaluation order - row by row, project
+# then keys - not pipeline stage by stage.
 ERROR_QUERIES = [
-    # division by zero in projection: raises in both pipelines, and
-    # deferral must not swallow it (deferral needs pure columns, so
-    # this query never defers)
-    "select name, 1 / (age - 36) from people",
+    # projection type error beats the ORDER BY division
+    ("select age + name from people order by 1 / 0", "cannot apply +"),
+    # reversed: the projection division beats the key's type error
+    ("select 1 / 0 from people order by age + name", "division by zero"),
+    # row 1's projection fails before any key runs
+    ("select 10 / (age - 36) from people order by 10 / (age - 41)",
+     "division by zero"),
+    # row 1 projects clean, so row 1's key fails before row 2's
+    # projection would
+    ("select 10 / (age - 41) from people order by 10 / (age - 36)",
+     "division by zero"),
     # positional reference out of range
-    "select name from people order by 5",
+    ("select name from people order by 5", "out of range"),
     # HAVING without grouping or aggregates
-    "select name from people having 1 > 0",
+    ("select name from people having 1 > 0", "HAVING"),
 ]
 
 
@@ -119,10 +129,11 @@ class CompiledPipelineParityTests(unittest.TestCase):
             self.assertEqual(fast, slow, sql)
 
     def test_errors_match(self):
-        for sql in ERROR_QUERIES:
+        for sql, expected in ERROR_QUERIES:
             fast, slow = self.run_both(sql)
             self.assertEqual(fast, slow, sql)
             self.assertEqual(fast[0], "err", sql)
+            self.assertIn(expected, fast[-1], sql)
 
     def test_pinned_results(self):
         out = run("select name from people order by score desc limit 2")

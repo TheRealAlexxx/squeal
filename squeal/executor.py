@@ -1097,17 +1097,28 @@ def execute(select, source, stats=None, exec_cache=None, outer=None):
     end = None if select.limit is None else start + select.limit
     if fast is not None:
         readers, key_fns, slots = fast
-        order_keys = [[kf(r) for kf in key_fns] for r in rows]
         # With a LIMIT and a projection of plain column reads (nothing that
         # could raise on a row), sorting first and projecting only the
         # survivors is exact: discarded rows have no observable effect.
         deferred = slots is not None and select.limit is not None \
             and not select.distinct
         if deferred:
+            # Keys are evaluated for every row in row order in both
+            # pipelines, and pure column reads cannot raise, so computing
+            # all keys first preserves the baseline's error order exactly.
             projected = None
+            order_keys = [[kf(r) for kf in key_fns] for r in rows]
+            pairs = list(zip(rows, order_keys))
         else:
-            projected = [tuple(f(r) for f in readers) for r in rows]
-        pairs = list(zip(rows if deferred else projected, order_keys))
+            # Baseline evaluation order, row by row: project, then keys,
+            # so a failing projection and a failing key compete exactly
+            # as they do on the RowContext path.
+            projected = []
+            order_keys = []
+            for r in rows:
+                projected.append(tuple(f(r) for f in readers))
+                order_keys.append([kf(r) for kf in key_fns])
+            pairs = list(zip(projected, order_keys))
     else:
         deferred = False
         projected = []
